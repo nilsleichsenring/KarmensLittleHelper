@@ -1,0 +1,9 @@
+/* Global styles (optional)
+   Wenn du später Chakra-Theme nutzt, wird vieles hier überflüssig */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, sans-serif;
+  background-color: #f8f9fa;
+}

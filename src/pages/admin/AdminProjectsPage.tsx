@@ -387,7 +387,7 @@ export function AdminProjectsPage() {
 
                             projectCountries.map((c) => (
                               <Badge key={c.id} variant="outline" pl={6} pr={8}>
-                                <CountryFlag code={c.country_code} size={14} radius={2} />{" "}
+                                <CountryFlag code={c.country_code} size={14} />{" "}
                                 {c.country_code}
                               </Badge>
                 

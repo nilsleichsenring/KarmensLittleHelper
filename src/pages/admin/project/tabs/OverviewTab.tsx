@@ -13,7 +13,6 @@ type Props = {
   projectCountries: ProjectCountry[];
   hostCountryCode: string | null;
   hostOrganisationName: string;
-  getCountryLabel: (code: string | null) => string;
 };
 
 export function OverviewTab({
@@ -22,7 +21,7 @@ export function OverviewTab({
   projectCountries,
   hostCountryCode,
   hostOrganisationName,
-  getCountryLabel,
+
 }: Props) {
   const inviteLink = `${window.location.origin}/p/${project.id}`;
 

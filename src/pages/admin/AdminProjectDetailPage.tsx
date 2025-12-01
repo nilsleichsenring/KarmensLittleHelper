@@ -230,7 +230,6 @@ export default function AdminProjectDetailPage() {
             hostCountryCode={project.organisations?.country_code ?? null}
             hostOrganisationName={project.organisations?.name ?? "Unknown host"}
             formatDateRange={formatDateRange}
-            getCountryLabel={getCountryLabel}
           />
         </Tabs.Panel>
 

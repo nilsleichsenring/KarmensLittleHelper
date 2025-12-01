@@ -9,12 +9,21 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+
 import { useState } from "react";
-import type { SubmissionSummary } from "../types";
+
+import type {
+  SubmissionSummary,
+  Project,
+  ProjectCountry,
+} from "../types";
+
+import { CountryFlag } from "../../../../components/CountryFlag";
 import { exportSubmissionPdf } from "../../../../lib/pdf/exportSubmitPage";
 
 type Props = {
-  projectName: string; // ← Neu!
+  project: Project;
+  countries: ProjectCountry[];
   submissions: SubmissionSummary[];
   loading: boolean;
   getCountryLabel: (code: string | null) => string;
@@ -22,7 +31,8 @@ type Props = {
 };
 
 export function SubmissionsTab({
-  projectName,
+  project,
+  countries,
   submissions,
   loading,
   getCountryLabel,
@@ -39,7 +49,17 @@ export function SubmissionsTab({
     }
   }
 
-  // Loading
+  // ---------------------------------------------
+  // Host info (comes from joined organisations table)
+  // ---------------------------------------------
+  const hostName = project.organisations?.name ?? "Unknown host";
+  const hostCountry = project.organisations?.country_code ?? null;
+
+  // Participating countries WITHOUT host
+  const participantCountries = countries
+    .filter((c) => c.country_code !== hostCountry)
+    .map((c) => c.country_code);
+
   if (loading) {
     return (
       <Group justify="center" mt="xl">
@@ -49,33 +69,94 @@ export function SubmissionsTab({
   }
 
   return (
-    <Stack gap="xl">
-      {/* PAGE HEADER */}
-      <Stack gap={0}>
+    <Stack gap="xl" align="center">
+
+      {/* ---------------------------------------------
+          HEADER
+      --------------------------------------------- */}
+      <Stack gap="xs" maw={700} w="100%">
         <Title order={3}>Project submissions</Title>
         <Text size="sm" c="dimmed">
-          {projectName}
+          {project.name}
         </Text>
       </Stack>
 
-      {/* EMPTY */}
+      {/* ---------------------------------------------
+          HOST + PARTICIPATING COUNTRIES CARD
+      --------------------------------------------- */}
+      <Card withBorder shadow="sm" radius="md" p="lg" maw={700} w="100%">
+        <Stack gap="lg">
+
+          {/* HOST */}
+          <Stack gap={2}>
+            <Text fw={600}>Project-Host</Text>
+
+            <Group gap={6}>
+              <CountryFlag code={hostCountry} size={20} />
+              <Text size="md">
+                {hostName}{" "}
+                {hostCountry && (
+                  <span style={{ opacity: 0.6 }}>({hostCountry})</span>
+                )}
+              </Text>
+            </Group>
+          </Stack>
+
+          <Divider />
+
+          {/* PARTICIPATING COUNTRIES */}
+          <Stack gap={2}>
+            <Text fw={600}>Participating countries</Text>
+
+            <Group gap="sm">
+              {participantCountries.map((code) => (
+                <CountryFlag key={code} code={code} size={26} />
+              ))}
+
+              {/* Host participates as well */}
+              <CountryFlag code={hostCountry} size={26} />
+            </Group>
+          </Stack>
+        </Stack>
+      </Card>
+
+      {/* ---------------------------------------------
+          EMPTY STATE
+      --------------------------------------------- */}
       {submissions.length === 0 && (
-        <Text c="dimmed">No submissions yet.</Text>
+        <Text c="dimmed" maw={700} w="100%">
+          No submissions yet.
+        </Text>
       )}
 
-      {/* SUBMISSION CARDS */}
+      {/* ---------------------------------------------
+          SUBMISSION CARDS
+      --------------------------------------------- */}
       {submissions.map((s) => (
-        <Card key={s.id} withBorder radius="md" p="lg" shadow="sm">
+        <Card
+          key={s.id}
+          withBorder
+          radius="md"
+          p="lg"
+          shadow="sm"
+          maw={700}
+          w="100%"
+        >
           <Stack gap="md">
-            {/* Header row */}
+
+            {/* HEADER ROW */}
             <Group justify="space-between" align="flex-start">
               <Stack gap={2}>
                 <Text fw={600} size="lg">
                   {s.organisation_name}
                 </Text>
-                <Text size="sm" c="dimmed">
-                  {getCountryLabel(s.country_code)}
-                </Text>
+
+                <Group gap={6}>
+                  <CountryFlag code={s.country_code} size={18} />
+                  <Text size="sm" c="dimmed">
+                    {getCountryLabel(s.country_code)}
+                  </Text>
+                </Group>
               </Stack>
 
               <Badge
@@ -89,7 +170,7 @@ export function SubmissionsTab({
 
             <Divider />
 
-            {/* Stats row */}
+            {/* STATS */}
             <Group gap="md">
               <Badge variant="outline">
                 {s.participantCount} participants
@@ -113,7 +194,7 @@ export function SubmissionsTab({
 
             <Divider />
 
-            {/* Action row */}
+            {/* ACTIONS */}
             <Group justify="flex-end" gap="sm">
               <Button
                 size="xs"
@@ -127,8 +208,8 @@ export function SubmissionsTab({
                 <Button
                   size="xs"
                   variant="outline"
-                  onClick={() => handleDownload(s.id)}
                   loading={downloadingId === s.id}
+                  onClick={() => handleDownload(s.id)}
                 >
                   {downloadingId === s.id
                     ? "Generating..."

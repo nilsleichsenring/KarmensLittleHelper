@@ -20,6 +20,9 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 
+// ✅ CountryFlag importiert
+import { CountryFlag } from "../../components/CountryFlag";
+
 type Project = {
   id: string;
   name: string;
@@ -87,14 +90,13 @@ export function AdminProjectsPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Daten laden: Projekte + zugehörige Länder
+  // Daten laden: Projekte + Länder
   // --------------------------------------------------
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       setLoadError(null);
 
-      // Projekte der Organisation
       const { data: projectsData, error: projectsError } = await supabase
         .from("projects")
         .select("*")
@@ -147,7 +149,7 @@ export function AdminProjectsPage() {
   }, [organisation_id]);
 
   // --------------------------------------------------
-  // Länder-Optionen aus Tabelle countries laden
+  // Länder Optionen laden
   // --------------------------------------------------
   useEffect(() => {
     async function loadCountries() {
@@ -185,7 +187,6 @@ export function AdminProjectsPage() {
     setNotes("");
     setCountries([{ id: 1, countryCode: "" }]);
     setFormError(null);
-    setSaving(false);
   }
 
   function handleOpenModal() {
@@ -200,10 +201,7 @@ export function AdminProjectsPage() {
   }
 
   function addCountryRow() {
-    setCountries((rows) => [
-      ...rows,
-      { id: Date.now(), countryCode: "" },
-    ]);
+    setCountries((rows) => [...rows, { id: Date.now(), countryCode: "" }]);
   }
 
   function removeCountryRow(id: number) {
@@ -223,27 +221,15 @@ export function AdminProjectsPage() {
       return;
     }
 
-    const validCountries = countries.filter(
-      (c) => c.countryCode.trim() !== ""
-    );
+    const validCountries = countries.filter((c) => c.countryCode.trim() !== "");
 
     if (validCountries.length === 0) {
       setFormError("Please add at least one country.");
       return;
     }
 
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      if (end < start) {
-        setFormError("End date must be after start date.");
-        return;
-      }
-    }
-
     setSaving(true);
 
-    // Projekt speichern
     const { data: projectData, error: projectError } = await supabase
       .from("projects")
       .insert({
@@ -266,7 +252,6 @@ export function AdminProjectsPage() {
 
     const newProject = projectData as Project;
 
-    // Länder speichern
     const countryInserts = validCountries.map((c) => ({
       project_id: newProject.id,
       country_code: c.countryCode,
@@ -278,15 +263,12 @@ export function AdminProjectsPage() {
       .select();
 
     if (countryError) {
-      console.error("Error creating project countries", countryError);
-      setFormError(
-        "Project was created, but countries could not be saved. Please check Supabase."
-      );
+      console.error("Error saving project countries", countryError);
+      setFormError("Project created, but countries could not be saved.");
       setSaving(false);
       return;
     }
 
-    // State aktualisieren
     setProjects((prev) => [newProject, ...prev]);
     setCountriesByProject((prev) => ({
       ...prev,
@@ -296,12 +278,11 @@ export function AdminProjectsPage() {
     setSaving(false);
     closeModal();
 
-    // Direkt zur Detailseite
     navigate(`/admin/projects/${newProject.id}`);
   }
 
   // --------------------------------------------------
-  // Anzeige-Helfer
+  // Hilfsfunktionen
   // --------------------------------------------------
   function formatDateRange(start: string | null, end: string | null) {
     if (!start && !end) return "Dates not set";
@@ -340,11 +321,9 @@ export function AdminProjectsPage() {
           <Text c="red">{loadError}</Text>
         ) : projects.length === 0 ? (
           <Card withBorder padding="lg" radius="lg" shadow="sm" bg="white">
-            <Title order={4} mb="xs">
-              No projects yet
-            </Title>
+            <Title order={4} mb="xs">No projects yet</Title>
             <Text c="dimmed" mb="md">
-              Create the first project for this organisation to get started.
+              Create the first project to get started.
             </Text>
             <Button onClick={handleOpenModal}>+ Create project</Button>
           </Card>
@@ -372,6 +351,7 @@ export function AdminProjectsPage() {
                         <Title order={4} lineClamp={2}>
                           {project.name}
                         </Title>
+
                         {project.project_type ? (
                           <Badge color="blue" variant="light">
                             {project.project_type}
@@ -389,16 +369,9 @@ export function AdminProjectsPage() {
                         </Text>
                         <Text
                           size="sm"
-                          c={
-                            !project.start_date && !project.end_date
-                              ? "dimmed"
-                              : undefined
-                          }
+                          c={!project.start_date && !project.end_date ? "dimmed" : undefined}
                         >
-                          {formatDateRange(
-                            project.start_date,
-                            project.end_date
-                          )}
+                          {formatDateRange(project.start_date, project.end_date)}
                         </Text>
                       </Stack>
 
@@ -406,16 +379,18 @@ export function AdminProjectsPage() {
                         <Text size="xs" c="dimmed" tt="uppercase">
                           Countries
                         </Text>
+
                         <Group gap={6}>
                           {projectCountries.length === 0 ? (
-                            <Text size="sm" c="dimmed">
-                              None yet
-                            </Text>
+                            <Text size="sm" c="dimmed">None yet</Text>
                           ) : (
+
                             projectCountries.map((c) => (
-                              <Badge key={c.id} variant="outline">
+                              <Badge key={c.id} variant="outline" pl={6} pr={8}>
+                                <CountryFlag code={c.country_code} size={14} radius={2} />{" "}
                                 {c.country_code}
                               </Badge>
+                
                             ))
                           )}
                         </Group>
@@ -428,12 +403,11 @@ export function AdminProjectsPage() {
                       <Button
                         variant="light"
                         size="xs"
-                        onClick={() =>
-                          navigate(`/admin/projects/${project.id}`)
-                        }
+                        onClick={() => navigate(`/admin/projects/${project.id}`)}
                       >
                         View project
                       </Button>
+
                       <Button variant="subtle" color="red" size="xs">
                         Delete
                       </Button>
@@ -445,7 +419,7 @@ export function AdminProjectsPage() {
           </Grid>
         )}
 
-        {/* Create Project Modal */}
+        {/* Modal */}
         <Modal
           opened={modalOpened}
           onClose={() => (saving ? null : closeModal())}
@@ -454,15 +428,13 @@ export function AdminProjectsPage() {
           centered
         >
           <Stack gap="lg">
-            {/* Basic information */}
+            {/* Basic info */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>
-                Basic information
-              </Text>
+              <Text size="sm" fw={600}>Basic information</Text>
 
               <TextInput
                 label="Project name"
-                placeholder="Youth Exchange Bremen → Amarante 2025"
+                placeholder="Youth Exchange 2025"
                 value={name}
                 onChange={(e) => setName(e.currentTarget.value)}
                 withAsterisk
@@ -477,18 +449,12 @@ export function AdminProjectsPage() {
                 clearable
               />
 
-              <TextInput
-                label="Organisation"
-                value={organisationName}
-                readOnly
-              />
+              <TextInput label="Organisation" value={organisationName} readOnly />
             </Stack>
 
-            {/* Project dates */}
+            {/* Dates */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>
-                Project dates
-              </Text>
+              <Text size="sm" fw={600}>Project dates</Text>
               <Group grow>
                 <TextInput
                   label="Start date"
@@ -505,14 +471,10 @@ export function AdminProjectsPage() {
               </Group>
             </Stack>
 
-            {/* Participating countries */}
+            {/* Countries */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>
-                Participating countries
-              </Text>
-              <Text size="xs" c="dimmed">
-                At least one country is required.
-              </Text>
+              <Text size="sm" fw={600}>Participating countries</Text>
+              <Text size="xs" c="dimmed">At least one country is required.</Text>
 
               <Stack gap="sm">
                 {countries.map((row, index) => (
@@ -523,13 +485,12 @@ export function AdminProjectsPage() {
                       data={countryOptions}
                       value={row.countryCode}
                       onChange={(value) =>
-                        updateCountryRow(row.id, {
-                          countryCode: value || "",
-                        })
+                        updateCountryRow(row.id, { countryCode: value || "" })
                       }
                       withAsterisk={index === 0}
                       flex={1}
                     />
+
                     <Button
                       variant="subtle"
                       color="red"
@@ -547,14 +508,13 @@ export function AdminProjectsPage() {
               </Stack>
             </Stack>
 
-            {/* Internal notes */}
+            {/* Notes */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>
-                Internal
-              </Text>
+              <Text size="sm" fw={600}>Internal</Text>
+
               <Textarea
                 label="Internal notes"
-                placeholder="Notes for your internal accounting, budget code, etc."
+                placeholder="Notes for accounting, etc."
                 value={notes}
                 onChange={(e) => setNotes(e.currentTarget.value)}
                 minRows={3}
@@ -562,17 +522,11 @@ export function AdminProjectsPage() {
             </Stack>
 
             {formError && (
-              <Text size="sm" c="red">
-                {formError}
-              </Text>
+              <Text size="sm" c="red">{formError}</Text>
             )}
 
             <Group justify="flex-end" mt="md">
-              <Button
-                variant="subtle"
-                onClick={closeModal}
-                disabled={saving}
-              >
+              <Button variant="subtle" onClick={closeModal} disabled={saving}>
                 Cancel
               </Button>
               <Button onClick={handleCreateProject} loading={saving}>

@@ -1,5 +1,16 @@
 import { type ProjectPartnerOrg } from "../types";
-import { Button, Card, Stack, Table, Text, TextInput, Select } from "@mantine/core";
+import {
+  Button,
+  Card,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Select,
+  Group,
+} from "@mantine/core";
+
+import { CountryFlag } from "../../../../components/CountryFlag";
 
 type Props = {
   partnerOrgs: ProjectPartnerOrg[];
@@ -24,7 +35,9 @@ export function PartnersTab({
 }: Props) {
   return (
     <Stack gap="lg">
-      {/* Add partner org */}
+      {/* ---------------------------------------------------
+          ADD PARTNER ORG
+      --------------------------------------------------- */}
       <Card withBorder radius="md" p="lg" maw={600}>
         <Text fw={600}>Add partner organisation</Text>
 
@@ -43,6 +56,19 @@ export function PartnersTab({
             value={newPartnerCountry}
             onChange={setNewPartnerCountry}
             clearable
+            searchable
+            // ---------- Show flag inside dropdown ----------
+            renderOption={({ option }) => (
+              <Group gap={8}>
+                <CountryFlag code={option.value} size={18} />
+                <Text>{option.label}</Text>
+              </Group>
+            )}
+            rightSection={
+              newPartnerCountry ? (
+                <CountryFlag code={newPartnerCountry} size={20} />
+              ) : null
+            }
           />
 
           <Button onClick={addPartnerOrg}>
@@ -51,7 +77,9 @@ export function PartnersTab({
         </Stack>
       </Card>
 
-      {/* List partner orgs */}
+      {/* ---------------------------------------------------
+          PARTNER LIST
+      --------------------------------------------------- */}
       <Card withBorder radius="md" p="lg">
         {partnerOrgs.length === 0 ? (
           <Text c="dimmed">No partner organisations yet.</Text>
@@ -65,12 +93,28 @@ export function PartnersTab({
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
+
             <Table.Tbody>
               {partnerOrgs.map((p) => (
                 <Table.Tr key={p.id}>
                   <Table.Td>{p.organisation_name}</Table.Td>
-                  <Table.Td>{p.country_code || "—"}</Table.Td>
-                  <Table.Td>{new Date(p.created_at).toLocaleString()}</Table.Td>
+
+                  {/* Country + flag */}
+                  <Table.Td>
+                    {p.country_code ? (
+                      <Group gap={8}>
+                        <CountryFlag code={p.country_code} size={20} />
+                        <Text>{p.country_code}</Text>
+                      </Group>
+                    ) : (
+                      <Text c="dimmed">—</Text>
+                    )}
+                  </Table.Td>
+
+                  <Table.Td>
+                    {new Date(p.created_at).toLocaleString()}
+                  </Table.Td>
+
                   <Table.Td>
                     <Button
                       size="xs"

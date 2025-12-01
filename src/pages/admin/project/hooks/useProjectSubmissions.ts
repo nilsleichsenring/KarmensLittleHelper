@@ -3,17 +3,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../../../lib/supabaseClient";
 import type { SubmissionSummary } from "../types";
 
-type ParticipantAggRow = {
-  project_partner_submission_id: string;
-  count: number;
-};
-
-type TicketAggRow = {
-  project_partner_submission_id: string;
-  total: number;
-  count: number;
-};
-
 export function useProjectSubmissions(projectId: string | null) {
   const [submissions, setSubmissions] = useState<SubmissionSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +16,7 @@ export function useProjectSubmissions(projectId: string | null) {
 
       setLoading(true);
 
-      // 1) Submissions
+      // 1) Basic submission info
       const { data: subs, error: subsError } = await supabase
         .from("project_partner_submissions")
         .select("id, organisation_name, country_code, submitted, submitted_at")
@@ -43,66 +32,39 @@ export function useProjectSubmissions(projectId: string | null) {
 
       const submissionsRaw = subs || [];
 
-      if (submissionsRaw.length === 0) {
-        setSubmissions([]);
-        setLoading(false);
-        return;
-      }
+      // 2) For each submission → load participant count + ticket count + sum
+      const result: SubmissionSummary[] = [];
 
-      const subIds = submissionsRaw.map((s) => s.id);
+      for (const s of submissionsRaw) {
+        // Participants
+        const { count: participantCount } = await supabase
+          .from("participants")
+          .select("*", { count: "exact", head: true })
+          .eq("project_partner_submission_id", s.id);
 
-      // 2) Participant counts
-      const { data: participantAgg, error: partError } = await supabase
-        .from("participants")
-        .select("project_partner_submission_id, count:count(*)")
-        .in("project_partner_submission_id", subIds);
+        // Tickets
+        const { data: tickets, count: ticketCount } = await supabase
+          .from("tickets")
+          .select("amount_eur", { count: "exact" })
+          .eq("project_partner_submission_id", s.id);
 
-      if (partError) {
-        console.error("Error loading participant agg", partError);
-      }
+        // Sum amounts
+        const totalEur =
+          tickets?.reduce((sum, t) => sum + (t.amount_eur || 0), 0) ?? 0;
 
-      // 3) Ticket totals
-      const { data: ticketsAgg, error: ticketError } = await supabase
-        .from("tickets")
-        .select(
-          "project_partner_submission_id, total:sum(amount_eur), count:count(*)"
-        )
-        .in("project_partner_submission_id", subIds);
-
-      if (ticketError) {
-        console.error("Error loading ticket agg", ticketError);
-      }
-
-      const pAgg =
-        (participantAgg as unknown as ParticipantAggRow[]) || [];
-
-    const tAgg =
-        (ticketsAgg as unknown as TicketAggRow[]) || [];
-
-
-      const list: SubmissionSummary[] = submissionsRaw.map((s) => {
-        const p = pAgg.find(
-          (x: ParticipantAggRow) =>
-            x.project_partner_submission_id === s.id
-        );
-        const t = tAgg.find(
-          (x: TicketAggRow) =>
-            x.project_partner_submission_id === s.id
-        );
-
-        return {
+        result.push({
           id: s.id,
           organisation_name: s.organisation_name,
           country_code: s.country_code,
           submitted: s.submitted,
           submitted_at: s.submitted_at,
-          participantCount: p?.count ?? 0,
-          ticketCount: t?.count ?? 0,
-          totalEur: t?.total ?? 0,
-        };
-      });
+          participantCount: participantCount ?? 0,
+          ticketCount: ticketCount ?? 0,
+          totalEur,
+        });
+      }
 
-      setSubmissions(list);
+      setSubmissions(result);
       setLoading(false);
     }
 

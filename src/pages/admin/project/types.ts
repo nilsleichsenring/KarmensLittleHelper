@@ -5,11 +5,18 @@ export type Project = {
   name: string;
   description: string | null;
   created_at: string;
+
   organisation_id: string | null;
   project_type: string | null;
   start_date: string | null;
   end_date: string | null;
   internal_notes: string | null;
+
+  // NEW: Host organisation info (from organisations table)
+  organisations?: {
+    name: string;
+    country_code: string;
+  } | null;
 };
 
 export type ProjectCountry = {

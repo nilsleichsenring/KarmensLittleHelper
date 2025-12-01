@@ -74,7 +74,16 @@ export default function AdminProjectDetailPage() {
       const { data: proj } = await supabase
         .from("projects")
         .select(`
-          *,
+          id,
+          name,
+          description,
+          created_at,
+          organisation_id,
+          project_type,
+          start_date,
+          end_date,
+          internal_notes,
+          project_reference,
           organisations:organisations!organisation_id (
             name,
             country_code
@@ -127,6 +136,22 @@ export default function AdminProjectDetailPage() {
     if (start && !end) return `from ${start}`;
     if (!start && end) return `until ${end}`;
     return `${start} → ${end}`;
+  }
+
+  // ---------------------------------------------------
+  // Update project reference number
+  // ---------------------------------------------------
+  async function updateProjectReference(newRef: string) {
+    if (!projectId) return;
+
+    await supabase
+      .from("projects")
+      .update({ project_reference: newRef })
+      .eq("id", projectId);
+
+    setProject((prev) =>
+      prev ? { ...prev, project_reference: newRef } : prev
+    );
   }
 
   // ---------------------------------------------------
@@ -230,6 +255,7 @@ export default function AdminProjectDetailPage() {
             hostCountryCode={project.organisations?.country_code ?? null}
             hostOrganisationName={project.organisations?.name ?? "Unknown host"}
             formatDateRange={formatDateRange}
+            onUpdateReference={updateProjectReference}
           />
         </Tabs.Panel>
 
@@ -266,7 +292,8 @@ export default function AdminProjectDetailPage() {
             loading={loadingSubmissions}
             getCountryLabel={getCountryLabel}
             onOpenSubmission={openSubmissionModal}
-          />
+/>
+
         </Tabs.Panel>
       </Tabs>
 

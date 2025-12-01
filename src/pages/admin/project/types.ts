@@ -8,11 +8,15 @@ export type Project = {
 
   organisation_id: string | null;
   project_type: string | null;
+
+  // NEW FIELD
+  project_reference: string | null;
+
   start_date: string | null;
   end_date: string | null;
   internal_notes: string | null;
 
-  // NEW: Host organisation info (from organisations table)
+  // Host organisation info (JOIN via organisations table)
   organisations?: {
     name: string;
     country_code: string;

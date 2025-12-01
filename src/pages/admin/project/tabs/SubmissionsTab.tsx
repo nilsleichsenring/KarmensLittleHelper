@@ -16,10 +16,15 @@ import type {
   SubmissionSummary,
   Project,
   ProjectCountry,
+  Participant,
+  Ticket,
 } from "../types";
 
 import { CountryFlag } from "../../../../components/CountryFlag";
-import { exportSubmissionPdf } from "../../../../lib/pdf/exportSubmitPage";
+
+import { generatePdf } from "../../../../lib/pdf/pdfEngine";
+import { renderAdminSubmission } from "../../../../lib/pdf/renderers/adminSubmission";
+import { supabase } from "../../../../lib/supabaseClient";
 
 type Props = {
   project: Project;
@@ -40,22 +45,83 @@ export function SubmissionsTab({
 }: Props) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  async function handleDownload(id: string) {
+  // ---------------------------------------------------------
+  // Load full submission details (participants + tickets)
+  // ---------------------------------------------------------
+  async function loadSubmissionFull(submissionId: string) {
+    // Participants
+    const { data: parts } = await supabase
+      .from("participants")
+      .select("id, full_name")
+      .eq("project_partner_submission_id", submissionId)
+      .order("full_name", { ascending: true });
+
+    const participants = (parts || []) as Participant[];
+
+    // Tickets
+    const { data: tix } = await supabase
+      .from("tickets")
+      .select(`
+        id,
+        from_location,
+        to_location,
+        amount_eur,
+        file_url,
+        ticket_participants (
+          participant: participants ( id, full_name )
+        )
+      `)
+      .eq("project_partner_submission_id", submissionId)
+      .order("created_at", { ascending: true });
+
+    const tickets: Ticket[] =
+      (tix || []).map((t) => ({
+        id: t.id,
+        from_location: t.from_location,
+        to_location: t.to_location,
+        amount_eur: t.amount_eur,
+        file_url: t.file_url,
+        assigned_participants:
+          t.ticket_participants?.map((tp: any) => tp.participant.full_name) ??
+          [],
+      })) ?? [];
+
+    return { participants, tickets };
+  }
+
+  // ---------------------------------------------------------
+  // PDF DOWNLOAD (new engine)
+  // ---------------------------------------------------------
+  async function handleDownload(submission: SubmissionSummary) {
     try {
-      setDownloadingId(id);
-      await exportSubmissionPdf(id);
+      setDownloadingId(submission.id);
+
+      // fetch full details
+      const { participants, tickets } = await loadSubmissionFull(
+        submission.id
+      );
+
+      await generatePdf(
+        renderAdminSubmission,
+        {
+          submission,
+          participants,
+          tickets,
+          project,
+        },
+        `reimbursement_${submission.organisation_name.replace(/\s+/g, "_")}.pdf`
+      );
     } finally {
       setDownloadingId(null);
     }
   }
 
   // ---------------------------------------------
-  // Host info (comes from joined organisations table)
+  // Host info
   // ---------------------------------------------
   const hostName = project.organisations?.name ?? "Unknown host";
   const hostCountry = project.organisations?.country_code ?? null;
 
-  // Participating countries WITHOUT host
   const participantCountries = countries
     .filter((c) => c.country_code !== hostCountry)
     .map((c) => c.country_code);
@@ -70,10 +136,6 @@ export function SubmissionsTab({
 
   return (
     <Stack gap="xl" align="center">
-
-      {/* ---------------------------------------------
-          HEADER
-      --------------------------------------------- */}
       <Stack gap="xs" maw={700} w="100%">
         <Title order={3}>Project submissions</Title>
         <Text size="sm" c="dimmed">
@@ -81,13 +143,8 @@ export function SubmissionsTab({
         </Text>
       </Stack>
 
-      {/* ---------------------------------------------
-          HOST + PARTICIPATING COUNTRIES CARD
-      --------------------------------------------- */}
       <Card withBorder shadow="sm" radius="md" p="lg" maw={700} w="100%">
         <Stack gap="lg">
-
-          {/* HOST */}
           <Stack gap={2}>
             <Text fw={600}>Project-Host</Text>
 
@@ -104,7 +161,6 @@ export function SubmissionsTab({
 
           <Divider />
 
-          {/* PARTICIPATING COUNTRIES */}
           <Stack gap={2}>
             <Text fw={600}>Participating countries</Text>
 
@@ -113,25 +169,18 @@ export function SubmissionsTab({
                 <CountryFlag key={code} code={code} size={26} />
               ))}
 
-              {/* Host participates as well */}
               <CountryFlag code={hostCountry} size={26} />
             </Group>
           </Stack>
         </Stack>
       </Card>
 
-      {/* ---------------------------------------------
-          EMPTY STATE
-      --------------------------------------------- */}
       {submissions.length === 0 && (
         <Text c="dimmed" maw={700} w="100%">
           No submissions yet.
         </Text>
       )}
 
-      {/* ---------------------------------------------
-          SUBMISSION CARDS
-      --------------------------------------------- */}
       {submissions.map((s) => (
         <Card
           key={s.id}
@@ -143,8 +192,6 @@ export function SubmissionsTab({
           w="100%"
         >
           <Stack gap="md">
-
-            {/* HEADER ROW */}
             <Group justify="space-between" align="flex-start">
               <Stack gap={2}>
                 <Text fw={600} size="lg">
@@ -170,15 +217,12 @@ export function SubmissionsTab({
 
             <Divider />
 
-            {/* STATS */}
             <Group gap="md">
               <Badge variant="outline">
                 {s.participantCount} participants
               </Badge>
 
-              <Badge variant="outline">
-                {s.ticketCount} tickets
-              </Badge>
+              <Badge variant="outline">{s.ticketCount} tickets</Badge>
 
               <Badge variant="outline">
                 EUR total: {s.totalEur.toFixed(2)}
@@ -194,7 +238,6 @@ export function SubmissionsTab({
 
             <Divider />
 
-            {/* ACTIONS */}
             <Group justify="flex-end" gap="sm">
               <Button
                 size="xs"
@@ -209,7 +252,7 @@ export function SubmissionsTab({
                   size="xs"
                   variant="outline"
                   loading={downloadingId === s.id}
-                  onClick={() => handleDownload(s.id)}
+                  onClick={() => handleDownload(s)}
                 >
                   {downloadingId === s.id
                     ? "Generating..."

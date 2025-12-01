@@ -13,7 +13,9 @@ import {
   Group,
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+
+import { generatePdf } from "../../lib/pdf/pdfEngine";
+import { renderPartnerSubmission } from "../../lib/pdf/renderers/partnerSubmission";
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 
@@ -29,6 +31,13 @@ type Submission = {
   iban: string | null;
   bic: string | null;
   account_holder: string | null;
+};
+
+type Project = {
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
+  project_reference: string | null;
 };
 
 type Participant = {
@@ -56,6 +65,8 @@ export default function PartnerSubmitPage() {
 
   const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [submission, setSubmission] = useState<Submission | null>(null);
+  const [project, setProject] = useState<Project | null>(null);
+
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
@@ -86,7 +97,7 @@ export default function PartnerSubmitPage() {
     setSubmissionId(stored);
   }, [projectToken]);
 
-  // Load data
+  // Load submission, project, participants, tickets
   useEffect(() => {
     async function loadAll() {
       if (!submissionId) return;
@@ -95,7 +106,7 @@ export default function PartnerSubmitPage() {
       setErrorMessage(null);
 
       // Submission
-      const { data: sub, error: subError } = await supabase
+      const { data: sub } = await supabase
         .from("project_partner_submissions")
         .select(
           "id, project_id, country_code, organisation_name, submitted, submitted_at, contact_name, contact_email, iban, bic, account_holder"
@@ -103,8 +114,7 @@ export default function PartnerSubmitPage() {
         .eq("id", submissionId)
         .single();
 
-      if (subError || !sub) {
-        console.error(subError);
+      if (!sub) {
         setErrorMessage("Could not load submission.");
         setLoading(false);
         return;
@@ -118,36 +128,31 @@ export default function PartnerSubmitPage() {
         return;
       }
 
+      // Load project
+      const { data: proj } = await supabase
+        .from("projects")
+        .select("name,start_date,end_date,project_reference")
+        .eq("id", submissionTyped.project_id)
+        .single();
+
+      setProject((proj as Project) || null);
+
       // Participants
-      const { data: partRows, error: partError } = await supabase
+      const { data: partRows } = await supabase
         .from("participants")
         .select("id, full_name")
         .eq("project_partner_submission_id", submissionId)
         .order("full_name", { ascending: true });
 
-      if (partError) {
-        console.error(partError);
-        setErrorMessage("Could not load participants.");
-        setLoading(false);
-        return;
-      }
-
       const participantsList = (partRows || []) as Participant[];
       setParticipants(participantsList);
 
       // Tickets
-      const { data: ticketRows, error: ticketError } = await supabase
+      const { data: ticketRows } = await supabase
         .from("tickets")
         .select("id, from_location, to_location, amount_eur, file_url")
         .eq("project_partner_submission_id", submissionId)
         .order("created_at", { ascending: true });
-
-      if (ticketError) {
-        console.error(ticketError);
-        setErrorMessage("Could not load tickets.");
-        setLoading(false);
-        return;
-      }
 
       const baseTickets =
         ((ticketRows || []) as Omit<Ticket, "assigned_participants">[]) || [];
@@ -158,7 +163,6 @@ export default function PartnerSubmitPage() {
         return;
       }
 
-      // Assigned participants
       const { data: tpRows } = await supabase
         .from("ticket_participants")
         .select("ticket_id, participant_id")
@@ -214,7 +218,6 @@ export default function PartnerSubmitPage() {
     setSubmitting(false);
 
     if (error) {
-      console.error(error);
       setErrorMessage("Could not submit your data. Please try again.");
       return;
     }
@@ -222,226 +225,32 @@ export default function PartnerSubmitPage() {
     navigate(`/p/${projectToken!}/done`, { replace: true });
   }
 
-  // ---------------------------------------------------------------
-  // PDF DOWNLOAD — fully rewritten + correctly scaled + safe embed
-  // ---------------------------------------------------------------
+  // DOWNLOAD PDF (using PDF Engine)
   async function handleDownloadPdf() {
-    if (!submission) return;
+    if (!submission || !project) return;
 
     setDownloadingPdf(true);
     setErrorMessage(null);
 
     try {
-      const pdfDoc = await PDFDocument.create();
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-      // ---------------- PAGE 1: SUMMARY ----------------
-      let page = pdfDoc.addPage([595.28, 841.89]);
-      const { height } = page.getSize();
-      let y = height - 50;
-
-      const line = () => {
-        y -= 15;
-        page.drawText("------------------------------------------------------------", {
-          x: 50,
-          y,
-          size: 10,
-          font,
-        });
-        y -= 20;
+      const data = {
+        submission,
+        project,
+        participants,
+        tickets,
       };
 
-      page.drawText("Travel Reimbursement Summary", {
-        x: 50,
-        y,
-        size: 18,
-        font,
-      });
-      y -= 30;
-
-      page.drawText("Organisation:", { x: 50, y, size: 12, font });
-      page.drawText(
-        `${submission.organisation_name} (${submission.country_code})`,
-        { x: 150, y, size: 12, font }
+      await generatePdf(
+        renderPartnerSubmission,
+        data,
+        `reimbursement_${submission.organisation_name.replace(/\s+/g, "_")}.pdf`
       );
-      y -= 20;
-
-      if (submission.contact_name || submission.contact_email) {
-        page.drawText("Contact:", { x: 50, y, size: 12, font });
-        page.drawText(
-          `${submission.contact_name || ""} ${
-            submission.contact_email ? " - " + submission.contact_email : ""
-          }`,
-          { x: 150, y, size: 12, font }
-        );
-        y -= 20;
-      }
-
-      line();
-
-      page.drawText("Bank details", { x: 50, y, size: 14, font });
-      y -= 20;
-
-      const pairs = [
-        ["Account holder:", submission.account_holder || "-"],
-        ["IBAN:", submission.iban || "-"],
-        ["BIC:", submission.bic || "-"],
-      ];
-
-      for (const [label, value] of pairs) {
-        page.drawText(label, { x: 50, y, size: 12, font });
-        page.drawText(value, { x: 160, y, size: 12, font });
-        y -= 18;
-      }
-
-      y -= 10;
-      line();
-
-      // Participants
-      page.drawText("Participants", { x: 50, y, size: 14, font });
-      y -= 20;
-
-      for (const p of participants) {
-        if (y < 80) {
-          page = pdfDoc.addPage([595.28, 841.89]);
-          y = page.getSize().height - 50;
-        }
-        page.drawText("- " + p.full_name, { x: 60, y, size: 12, font });
-        y -= 16;
-      }
-
-      y -= 10;
-      line();
-
-      // Tickets overview
-      page.drawText("Tickets (overview)", { x: 50, y, size: 14, font });
-      y -= 20;
-
-      for (let i = 0; i < tickets.length; i++) {
-        const t = tickets[i];
-        if (y < 80) {
-          page = pdfDoc.addPage([595.28, 841.89]);
-          y = page.getSize().height - 50;
-        }
-
-        page.drawText(
-          `${i + 1}. ${t.from_location} -> ${t.to_location} (${t.amount_eur.toFixed(
-            2
-          )} EUR)`,
-          { x: 60, y, size: 12, font }
-        );
-        y -= 16;
-
-        page.drawText(
-          `   Participants: ${
-            t.assigned_participants.length > 0
-              ? t.assigned_participants.join(", ")
-              : "-"
-          }`,
-          { x: 60, y, size: 11, font }
-        );
-        y -= 18;
-      }
-
-      // ---------------- PDF: TICKET FILES ----------------
-      for (let i = 0; i < tickets.length; i++) {
-        const t = tickets[i];
-        if (!t.file_url) continue;
-
-        const { data: fileBlob, error: fileError } = await supabase.storage
-          .from("tickets")
-          .download(t.file_url);
-
-        if (fileError || !fileBlob) continue;
-
-        const bytes = await fileBlob.arrayBuffer();
-        const ticketPdf = await PDFDocument.load(bytes);
-
-        const copied = await pdfDoc.copyPages(ticketPdf, ticketPdf.getPageIndices());
-
-        // FIRST PAGE (WRAPPER + HEADER)
-        const original = copied[0];
-        const { width: pw, height: ph } = original.getSize();
-
-        const wrapper = pdfDoc.addPage([pw, ph]);
-
-        wrapper.drawText(`Ticket ${i + 1} of ${tickets.length}`, {
-          x: 40,
-          y: ph - 40,
-          size: 16,
-          font,
-        });
-
-        wrapper.drawText(`${t.from_location} -> ${t.to_location} (${t.amount_eur.toFixed(2)} EUR)`, {
-          x: 40,
-          y: ph - 60,
-          size: 12,
-          font,
-        });
-
-        if (t.assigned_participants.length > 0) {
-          wrapper.drawText(
-            `Participants: ${t.assigned_participants.join(", ")}`,
-            {
-              x: 40,
-              y: ph - 80,
-              size: 12,
-              font,
-            }
-          );
-        }
-
-        const scale = 0.8;
-        const embedded = await wrapper.doc.embedPage(original);
-        const scaledH = ph * scale;
-
-        let imgY = ph - 100 - scaledH;
-        if (imgY < 30) imgY = 30;
-
-        wrapper.drawPage(embedded, {
-          x: 40,
-          y: imgY,
-          xScale: scale,
-          yScale: scale,
-        });
-
-        // Following pages
-        for (let p = 1; p < copied.length; p++) {
-          const orig = copied[p];
-          const { width: w, height: h } = orig.getSize();
-
-          const newPage = pdfDoc.addPage([w, h]);
-          const embeddedNext = await pdfDoc.embedPage(orig);
-
-          newPage.drawPage(embeddedNext, {
-            x: 0,
-            y: 0,
-            xScale: scale,
-            yScale: scale,
-          });
-        }
-      }
-
-      // Save + download
-      const finalBytes = await pdfDoc.save();
-      const safe = new Uint8Array(finalBytes);
-      const blob = new Blob([safe], { type: "application/pdf" });
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `reimbursement_${submission.organisation_name.replace(
-        /\s+/g,
-        "_"
-      )}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
       setErrorMessage("Could not generate PDF.");
-    } finally {
-      setDownloadingPdf(false);
     }
+
+    setDownloadingPdf(false);
   }
 
   // Rendering
@@ -500,6 +309,7 @@ export default function PartnerSubmitPage() {
             </Text>
           </Stack>
 
+          {/* Organisation */}
           <Stack gap={2}>
             <Text size="sm" c="dimmed">
               Organisation
@@ -509,6 +319,7 @@ export default function PartnerSubmitPage() {
             </Text>
           </Stack>
 
+          {/* Contact */}
           <Stack gap={2}>
             <Text size="sm" c="dimmed">
               Contact person
@@ -516,18 +327,18 @@ export default function PartnerSubmitPage() {
             <Text>
               {submission.contact_name || "-"}
               {submission.contact_email
-                ? ` – ${submission.contact_email}`
+                ? ` — ${submission.contact_email}`
                 : ""}
             </Text>
           </Stack>
 
+          {/* Bank */}
           <Stack gap={2}>
             <Text size="sm" c="dimmed">
               Bank information
             </Text>
             <Text>
-              <strong>Account holder:</strong>{" "}
-              {submission.account_holder || "-"}
+              <strong>Account holder:</strong> {submission.account_holder || "-"}
             </Text>
             <Text>
               <strong>IBAN:</strong> {submission.iban || "-"}
@@ -537,6 +348,7 @@ export default function PartnerSubmitPage() {
             </Text>
           </Stack>
 
+          {/* Participants */}
           <Stack gap="xs">
             <Group justify="space-between">
               <Title order={4}>Participants</Title>
@@ -566,6 +378,7 @@ export default function PartnerSubmitPage() {
             </Table>
           </Stack>
 
+          {/* Tickets */}
           <Stack gap="xs">
             <Group justify="space-between">
               <Title order={4}>Tickets</Title>

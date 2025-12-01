@@ -20,7 +20,6 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 
-// ✅ CountryFlag importiert
 import { CountryFlag } from "../../components/CountryFlag";
 
 type Project = {
@@ -31,6 +30,7 @@ type Project = {
   start_date: string | null;
   end_date: string | null;
   internal_notes: string | null;
+  project_reference?: string | null;
   created_at: string;
 };
 
@@ -51,9 +51,9 @@ const ORG_LABELS: Record<string, string> = {
 };
 
 const PROJECT_TYPES = [
-  { value: "Youth Exchange", label: "Youth Exchange" },
-  { value: "Training Course", label: "Training Course" },
-  { value: "Seminar", label: "Seminar" },
+  { value: "youth_exchange", label: "Youth exchange" },
+  { value: "training", label: "Training" },
+  { value: "meeting", label: "Meeting" },
 ];
 
 export function AdminProjectsPage() {
@@ -77,9 +77,10 @@ export function AdminProjectsPage() {
   const [modalOpened, { open: openModal, close: closeModal }] =
     useDisclosure(false);
 
-  // Formular-States
+  // FORM STATE
   const [name, setName] = useState("");
   const [projectType, setProjectType] = useState<string | null>(null);
+  const [referenceNumber, setReferenceNumber] = useState(""); // NEW
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -89,54 +90,49 @@ export function AdminProjectsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // --------------------------------------------------
-  // Daten laden: Projekte + Länder
-  // --------------------------------------------------
+  // LOAD PROJECTS
   useEffect(() => {
-    async function loadData() {
+    async function load() {
       setLoading(true);
-      setLoadError(null);
 
-      const { data: projectsData, error: projectsError } = await supabase
+      const { data: projectsData, error } = await supabase
         .from("projects")
         .select("*")
         .eq("organisation_id", organisation_id)
         .order("created_at", { ascending: false });
 
-      if (projectsError) {
-        console.error("Error loading projects", projectsError);
+      if (error) {
+        console.error(error);
         setLoadError("Could not load projects.");
-        setProjects([]);
+        setLoading(false);
+        return;
+      }
+
+      const list = projectsData || [];
+      setProjects(list);
+
+      if (list.length === 0) {
         setCountriesByProject({});
         setLoading(false);
         return;
       }
 
-      const loadedProjects = projectsData || [];
-      setProjects(loadedProjects);
+      const ids = list.map((p) => p.id);
 
-      if (loadedProjects.length === 0) {
-        setCountriesByProject({});
-        setLoading(false);
-        return;
-      }
-
-      const projectIds = loadedProjects.map((p) => p.id);
-
-      const { data: countriesData, error: countriesError } = await supabase
+      const { data: cdata, error: cerr } = await supabase
         .from("project_countries")
         .select("*")
-        .in("project_id", projectIds);
+        .in("project_id", ids);
 
-      if (countriesError) {
-        console.error("Error loading project countries", countriesError);
+      if (cerr) {
+        console.error(cerr);
         setCountriesByProject({});
         setLoading(false);
         return;
       }
 
       const map: Record<string, ProjectCountry[]> = {};
-      (countriesData || []).forEach((row) => {
+      (cdata || []).forEach((row) => {
         if (!map[row.project_id]) map[row.project_id] = [];
         map[row.project_id].push(row as ProjectCountry);
       });
@@ -145,43 +141,37 @@ export function AdminProjectsPage() {
       setLoading(false);
     }
 
-    loadData();
+    load();
   }, [organisation_id]);
 
-  // --------------------------------------------------
-  // Länder Optionen laden
-  // --------------------------------------------------
+  // LOAD COUNTRY OPTIONS
   useEffect(() => {
     async function loadCountries() {
       const { data, error } = await supabase
         .from("countries")
         .select("code, name")
-        .order("name", { ascending: true });
+        .order("name");
 
       if (error) {
-        console.error("Error loading countries", error);
-        setCountryOptions([]);
+        console.error(error);
         return;
       }
 
-      const options =
-        data?.map((c) => ({
+      setCountryOptions(
+        (data || []).map((c) => ({
           value: c.code,
           label: c.name,
-        })) ?? [];
-
-      setCountryOptions(options);
+        }))
+      );
     }
-
     loadCountries();
   }, []);
 
-  // --------------------------------------------------
-  // Formular-Helfer
-  // --------------------------------------------------
+  // RESET FORM
   function resetForm() {
     setName("");
     setProjectType(null);
+    setReferenceNumber(""); // RESET NEW FIELD
     setStartDate("");
     setEndDate("");
     setNotes("");
@@ -210,9 +200,7 @@ export function AdminProjectsPage() {
     );
   }
 
-  // --------------------------------------------------
-  // Projekt anlegen
-  // --------------------------------------------------
+  // CREATE PROJECT
   async function handleCreateProject() {
     setFormError(null);
 
@@ -221,21 +209,26 @@ export function AdminProjectsPage() {
       return;
     }
 
-    const validCountries = countries.filter((c) => c.countryCode.trim() !== "");
+    if (!referenceNumber.trim()) {
+      setFormError("Reference number is required.");
+      return;
+    }
 
+    const validCountries = countries.filter((c) => c.countryCode.trim() !== "");
     if (validCountries.length === 0) {
-      setFormError("Please add at least one country.");
+      setFormError("Add at least one country.");
       return;
     }
 
     setSaving(true);
 
-    const { data: projectData, error: projectError } = await supabase
+    const { data: projectData, error: pErr } = await supabase
       .from("projects")
       .insert({
         name,
         organisation_id,
         project_type: projectType,
+        project_reference: referenceNumber, // NEW FIELD
         start_date: startDate || null,
         end_date: endDate || null,
         internal_notes: notes || null,
@@ -243,28 +236,28 @@ export function AdminProjectsPage() {
       .select()
       .single();
 
-    if (projectError || !projectData) {
-      console.error("Error creating project", projectError);
-      setFormError("Could not create project. Please try again.");
+    if (pErr || !projectData) {
+      console.error(pErr);
+      setFormError("Could not create project.");
       setSaving(false);
       return;
     }
 
     const newProject = projectData as Project;
 
-    const countryInserts = validCountries.map((c) => ({
+    const inserts = validCountries.map((c) => ({
       project_id: newProject.id,
       country_code: c.countryCode,
     }));
 
-    const { data: insertedCountries, error: countryError } = await supabase
+    const { data: pcData, error: pcErr } = await supabase
       .from("project_countries")
-      .insert(countryInserts)
+      .insert(inserts)
       .select();
 
-    if (countryError) {
-      console.error("Error saving project countries", countryError);
-      setFormError("Project created, but countries could not be saved.");
+    if (pcErr) {
+      console.error(pcErr);
+      setFormError("Project created, but countries failed.");
       setSaving(false);
       return;
     }
@@ -272,18 +265,15 @@ export function AdminProjectsPage() {
     setProjects((prev) => [newProject, ...prev]);
     setCountriesByProject((prev) => ({
       ...prev,
-      [newProject.id]: (insertedCountries || []) as ProjectCountry[],
+      [newProject.id]: pcData || [],
     }));
 
     setSaving(false);
     closeModal();
-
     navigate(`/admin/projects/${newProject.id}`);
   }
 
-  // --------------------------------------------------
-  // Hilfsfunktionen
-  // --------------------------------------------------
+  // FORMAT DATE RANGE
   function formatDateRange(start: string | null, end: string | null) {
     if (!start && !end) return "Dates not set";
     if (start && !end) return `from ${start}`;
@@ -291,21 +281,16 @@ export function AdminProjectsPage() {
     return `${start} → ${end}`;
   }
 
-  // --------------------------------------------------
-  // Render
-  // --------------------------------------------------
+  // RENDER
   return (
     <Box style={{ minHeight: "100vh" }} bg="#f5f6fa" py="xl">
       <Container size="lg">
-        {/* Header */}
         <Group justify="space-between" mb="xl">
           <Stack gap={4}>
-            <Text size="sm" c="dimmed">
-              Organisation
-            </Text>
+            <Text size="sm" c="dimmed">Organisation</Text>
             <Title order={2}>{organisationName}</Title>
             <Text size="sm" c="dimmed">
-              Manage all youth projects and participating countries for this organisation.
+              Manage all youth projects and participating countries.
             </Text>
           </Stack>
 
@@ -314,83 +299,50 @@ export function AdminProjectsPage() {
           </Button>
         </Group>
 
-        {/* Content */}
+        {/* ---- Project List ---- */}
         {loading ? (
-          <Text>Loading projects…</Text>
+          <Text>Loading…</Text>
         ) : loadError ? (
           <Text c="red">{loadError}</Text>
         ) : projects.length === 0 ? (
           <Card withBorder padding="lg" radius="lg" shadow="sm" bg="white">
-            <Title order={4} mb="xs">No projects yet</Title>
-            <Text c="dimmed" mb="md">
-              Create the first project to get started.
-            </Text>
-            <Button onClick={handleOpenModal}>+ Create project</Button>
+            <Title order={4}>No projects yet</Title>
+            <Text c="dimmed">Create the first project.</Text>
+            <Button mt="md" onClick={handleOpenModal}>
+              + Create project
+            </Button>
           </Card>
         ) : (
           <Grid>
             {projects.map((project) => {
               const projectCountries = countriesByProject[project.id] || [];
-
               return (
                 <Grid.Col key={project.id} span={{ base: 12, sm: 6, md: 4 }}>
-                  <Card
-                    withBorder
-                    padding="lg"
-                    radius="lg"
-                    shadow="md"
-                    bg="white"
-                    style={{
-                      height: "100%",
-                      display: "flex",
-                      flexDirection: "column",
-                    }}
-                  >
+                  <Card withBorder padding="lg" radius="lg" shadow="md" bg="white">
                     <Stack gap="sm" style={{ flexGrow: 1 }}>
-                      <Group justify="space-between" align="flex-start">
-                        <Title order={4} lineClamp={2}>
-                          {project.name}
-                        </Title>
+                      <Group justify="space-between">
+                        <Title order={4}>{project.name}</Title>
 
-                        {project.project_type ? (
-                          <Badge color="blue" variant="light">
-                            {project.project_type}
-                          </Badge>
-                        ) : (
-                          <Badge color="gray" variant="light">
-                            No type
-                          </Badge>
-                        )}
+                        <Badge variant="light" color="blue">
+                          {project.project_type || "No type"}
+                        </Badge>
                       </Group>
 
                       <Stack gap={2}>
-                        <Text size="xs" c="dimmed" tt="uppercase">
-                          Dates
-                        </Text>
-                        <Text
-                          size="sm"
-                          c={!project.start_date && !project.end_date ? "dimmed" : undefined}
-                        >
-                          {formatDateRange(project.start_date, project.end_date)}
-                        </Text>
+                        <Text size="xs" c="dimmed">Dates</Text>
+                        <Text>{formatDateRange(project.start_date, project.end_date)}</Text>
                       </Stack>
 
                       <Stack gap={4}>
-                        <Text size="xs" c="dimmed" tt="uppercase">
-                          Countries
-                        </Text>
-
+                        <Text size="xs" c="dimmed">Countries</Text>
                         <Group gap={6}>
                           {projectCountries.length === 0 ? (
                             <Text size="sm" c="dimmed">None yet</Text>
                           ) : (
-
                             projectCountries.map((c) => (
                               <Badge key={c.id} variant="outline" pl={6} pr={8}>
-                                <CountryFlag code={c.country_code} size={14} />{" "}
-                                {c.country_code}
+                                <CountryFlag code={c.country_code} size={14} /> {c.country_code}
                               </Badge>
-                
                             ))
                           )}
                         </Group>
@@ -419,19 +371,17 @@ export function AdminProjectsPage() {
           </Grid>
         )}
 
-        {/* Modal */}
+        {/* ---- Modal ---- */}
         <Modal
           opened={modalOpened}
-          onClose={() => (saving ? null : closeModal())}
+          onClose={() => (!saving ? closeModal() : null)}
           title="Create project"
           size="lg"
           centered
         >
           <Stack gap="lg">
-            {/* Basic info */}
+            {/* Basic */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>Basic information</Text>
-
               <TextInput
                 label="Project name"
                 placeholder="Youth Exchange 2025"
@@ -449,12 +399,20 @@ export function AdminProjectsPage() {
                 clearable
               />
 
+              {/* NEW FIELD */}
+              <TextInput
+                label="Reference number"
+                placeholder="2024-1-DE03-KA152-YOU-000000123"
+                value={referenceNumber}
+                onChange={(e) => setReferenceNumber(e.currentTarget.value)}
+                withAsterisk
+              />
+
               <TextInput label="Organisation" value={organisationName} readOnly />
             </Stack>
 
             {/* Dates */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>Project dates</Text>
               <Group grow>
                 <TextInput
                   label="Start date"
@@ -489,8 +447,7 @@ export function AdminProjectsPage() {
                       }
                       withAsterisk={index === 0}
                       flex={1}
-                    />
-
+                      />
                     <Button
                       variant="subtle"
                       color="red"
@@ -501,7 +458,6 @@ export function AdminProjectsPage() {
                     </Button>
                   </Group>
                 ))}
-
                 <Button variant="light" size="xs" onClick={addCountryRow}>
                   + Add country
                 </Button>
@@ -510,8 +466,6 @@ export function AdminProjectsPage() {
 
             {/* Notes */}
             <Stack gap="xs">
-              <Text size="sm" fw={600}>Internal</Text>
-
               <Textarea
                 label="Internal notes"
                 placeholder="Notes for accounting, etc."
@@ -521,11 +475,9 @@ export function AdminProjectsPage() {
               />
             </Stack>
 
-            {formError && (
-              <Text size="sm" c="red">{formError}</Text>
-            )}
+            {formError && <Text c="red">{formError}</Text>}
 
-            <Group justify="flex-end" mt="md">
+            <Group justify="flex-end">
               <Button variant="subtle" onClick={closeModal} disabled={saving}>
                 Cancel
               </Button>

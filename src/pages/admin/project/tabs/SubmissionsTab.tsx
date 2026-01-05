@@ -1,16 +1,21 @@
+// src/pages/admin/project/tabs/SubmissionsTab.tsx
+
 import {
+  Alert,
   Badge,
   Button,
   Card,
   Divider,
   Group,
   Loader,
+  Modal,
   Stack,
+  Tabs,
   Text,
   Title,
 } from "@mantine/core";
-
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../../../lib/supabaseClient";
 
 import type {
   SubmissionSummary,
@@ -18,13 +23,148 @@ import type {
   ProjectCountry,
   Participant,
   Ticket,
+  ProjectPartnerOrg,
 } from "../types";
 
-import { CountryFlag } from "../../../../components/CountryFlag";
+import CountryFlag from "../../../../components/CountryFlag";
 
 import { generatePdf } from "../../../../lib/pdf/pdfEngine";
 import { renderAdminSubmission } from "../../../../lib/pdf/renderers/adminSubmission";
-import { supabase } from "../../../../lib/supabaseClient";
+
+/* =========================================================
+   BADGE LOGIC
+========================================================= */
+
+type SubmissionBadge = {
+  key: string;
+  label: string;
+  color: "gray" | "green" | "yellow" | "blue" | "red";
+};
+
+function getSubmissionBadges(
+  submission: SubmissionSummary,
+  partnerOrg: ProjectPartnerOrg | null,
+  opts?: { showDistanceBadge?: boolean }
+): SubmissionBadge[] {
+  const badges: SubmissionBadge[] = [];
+  const showDistanceBadge = opts?.showDistanceBadge ?? true;
+
+  // 1️⃣ Distance missing → highest priority (only if enabled)
+  if (showDistanceBadge && (!partnerOrg || partnerOrg.distance_km == null)) {
+    badges.push({
+      key: "needs-distance",
+      label: "Needs distance entry",
+      color: "red",
+    });
+    return badges;
+  }
+
+  // 2️⃣ Claim status
+  if (submission.claim_status === "approved") {
+    badges.push({
+      key: "approved",
+      label: "Approved as claimed",
+      color: "green",
+    });
+  }
+
+  if (submission.claim_status === "adjusted") {
+    badges.push({
+      key: "adjusted",
+      label: "Adjusted & approved",
+      color: "yellow",
+    });
+  }
+
+  if (submission.claim_status === "open") {
+    badges.push({
+      key: "open",
+      label: "Needs review",
+      color: "gray",
+    });
+  }
+
+  if (submission.claim_status === "rejected") {
+    badges.push({
+      key: "rejected",
+      label: "Rejected",
+      color: "red",
+    });
+  }
+
+  return badges;
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+type TabKey = "pending" | "approved" | "rejected" | "abandoned";
+
+function classifySubmission(
+  submission: SubmissionSummary,
+  partnerOrg: ProjectPartnerOrg | null
+): TabKey {
+  // Abandoned: submitted = false
+  if (!submission.submitted) return "abandoned";
+
+  // Pending: submitted true AND (distance missing OR needs review)
+  const needsDistance = !partnerOrg || partnerOrg.distance_km == null;
+  if (needsDistance) return "pending";
+  if (submission.claim_status === "open") return "pending";
+
+  // Approved
+  if (
+    submission.claim_status === "approved" ||
+    submission.claim_status === "adjusted"
+  ) {
+    return "approved";
+  }
+
+  // Rejected
+  if (submission.claim_status === "rejected") return "rejected";
+
+  // Fallback (should not happen with your allowed statuses)
+  return "pending";
+}
+
+async function hardDeleteSubmission(submissionId: string) {
+  // 1) ticket_participants
+  const { error: tpErr } = await supabase
+    .from("ticket_participants")
+    .delete()
+    .eq("project_partner_submission_id", submissionId);
+
+  // If your schema doesn't have project_partner_submission_id on ticket_participants,
+  // you can swap this to:
+  // - load ticket ids first, then delete .in("ticket_id", ticketIds)
+  if (tpErr) throw tpErr;
+
+  // 2) tickets
+  const { error: ticketsErr } = await supabase
+    .from("tickets")
+    .delete()
+    .eq("project_partner_submission_id", submissionId);
+  if (ticketsErr) throw ticketsErr;
+
+  // 3) participants
+  const { error: participantsErr } = await supabase
+    .from("participants")
+    .delete()
+    .eq("project_partner_submission_id", submissionId);
+  if (participantsErr) throw participantsErr;
+
+  // 4) submission
+  const { error: subErr } = await supabase
+    .from("project_partner_submissions")
+    .delete()
+    .eq("id", submissionId);
+  if (subErr) throw subErr;
+}
+
+/* =========================================================
+   COMPONENT
+========================================================= */
 
 type Props = {
   project: Project;
@@ -44,70 +184,97 @@ export function SubmissionsTab({
   onOpenSubmission,
 }: Props) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [partnerOrgs, setPartnerOrgs] = useState<ProjectPartnerOrg[]>([]);
+  const [loadingOrgs, setLoadingOrgs] = useState(true);
 
-  // ---------------------------------------------------------
-  // Load full submission details (participants + tickets)
-  // ---------------------------------------------------------
-  async function loadSubmissionFull(submissionId: string) {
-    // Participants
-    const { data: parts } = await supabase
-      .from("participants")
-      .select("id, full_name")
-      .eq("project_partner_submission_id", submissionId)
-      .order("full_name", { ascending: true });
+  // Local copy so we can remove deleted items without requiring parent refetch
+  const [localSubmissions, setLocalSubmissions] =
+    useState<SubmissionSummary[]>(submissions);
 
-    const participants = (parts || []) as Participant[];
+  useEffect(() => {
+    setLocalSubmissions(submissions);
+  }, [submissions]);
 
-    // Tickets
-    const { data: tix } = await supabase
-      .from("tickets")
-      .select(`
-        id,
-        from_location,
-        to_location,
-        amount_eur,
-        file_url,
-        ticket_participants (
-          participant: participants ( id, full_name )
-        )
-      `)
-      .eq("project_partner_submission_id", submissionId)
-      .order("created_at", { ascending: true });
+  // Delete modal state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SubmissionSummary | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-    const tickets: Ticket[] =
-      (tix || []).map((t) => ({
-        id: t.id,
-        from_location: t.from_location,
-        to_location: t.to_location,
-        amount_eur: t.amount_eur,
-        file_url: t.file_url,
-        assigned_participants:
-          t.ticket_participants?.map((tp: any) => tp.participant.full_name) ??
-          [],
-      })) ?? [];
+  /* ---------------------------------------------------------
+     Load Partner Organisations (SOURCE OF TRUTH)
+  --------------------------------------------------------- */
+  useEffect(() => {
+    let active = true;
 
-    return { participants, tickets };
+    async function loadPartnerOrgs() {
+      setLoadingOrgs(true);
+
+      const { data, error } = await supabase
+        .from("project_partner_orgs")
+        .select("*")
+        .eq("project_id", project.id);
+
+      if (!error && active) {
+        setPartnerOrgs((data || []) as ProjectPartnerOrg[]);
+      }
+
+      if (active) setLoadingOrgs(false);
+    }
+
+    loadPartnerOrgs();
+    return () => {
+      active = false;
+    };
+  }, [project.id]);
+
+  /* ---------------------------------------------------------
+     Helpers
+  --------------------------------------------------------- */
+  function getPartnerOrgForSubmission(
+    submission: SubmissionSummary
+  ): ProjectPartnerOrg | null {
+    return (
+      partnerOrgs.find(
+        (o) =>
+          o.project_id === submission.project_id &&
+          o.organisation_name === submission.organisation_name
+      ) ?? null
+    );
   }
 
-  // ---------------------------------------------------------
-  // PDF DOWNLOAD (new engine)
-  // ---------------------------------------------------------
+  /* ---------------------------------------------------------
+     PDF DOWNLOAD
+  --------------------------------------------------------- */
   async function handleDownload(submission: SubmissionSummary) {
     try {
       setDownloadingId(submission.id);
 
-      // fetch full details
-      const { participants, tickets } = await loadSubmissionFull(
-        submission.id
-      );
+      const { data: parts } = await supabase
+        .from("participants")
+        .select("id, full_name, is_green_travel")
+        .eq("project_partner_submission_id", submission.id);
+
+      const { data: tix } = await supabase
+        .from("tickets")
+        .select("id, from_location, to_location, amount_eur")
+        .eq("project_partner_submission_id", submission.id);
+
+      const partnerOrg = getPartnerOrgForSubmission(submission);
 
       await generatePdf(
         renderAdminSubmission,
         {
           submission,
-          participants,
-          tickets,
+          participants: (parts || []) as Participant[],
+          tickets: (tix || []) as Ticket[],
           project,
+          rates: {
+            standard: partnerOrg?.rate_standard_eur ?? 0,
+            green: partnerOrg?.rate_green_eur ?? 0,
+          },
         },
         `reimbursement_${submission.organisation_name.replace(/\s+/g, "_")}.pdf`
       );
@@ -116,17 +283,61 @@ export function SubmissionsTab({
     }
   }
 
-  // ---------------------------------------------
-  // Host info
-  // ---------------------------------------------
-  const hostName = project.organisations?.name ?? "Unknown host";
-  const hostCountry = project.organisations?.country_code ?? null;
+  /* ---------------------------------------------------------
+     Delete
+  --------------------------------------------------------- */
+  function openDeleteModal(sub: SubmissionSummary) {
+    setDeleteError(null);
+    setDeleteTarget(sub);
+    setDeleteOpen(true);
+  }
 
-  const participantCountries = countries
-    .filter((c) => c.country_code !== hostCountry)
-    .map((c) => c.country_code);
+  async function confirmDelete() {
+    if (!deleteTarget) return;
 
-  if (loading) {
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await hardDeleteSubmission(deleteTarget.id);
+
+      // Remove locally
+      setLocalSubmissions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error(err);
+      setDeleteError("Could not delete submission. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  /* ---------------------------------------------------------
+     Derived tab lists
+  --------------------------------------------------------- */
+  const grouped = useMemo(() => {
+    const result: Record<TabKey, SubmissionSummary[]> = {
+      pending: [],
+      approved: [],
+      rejected: [],
+      abandoned: [],
+    };
+
+    for (const s of localSubmissions) {
+      const partnerOrg = getPartnerOrgForSubmission(s);
+      const key = classifySubmission(s, partnerOrg);
+      result[key].push(s);
+    }
+
+    return result;
+  }, [localSubmissions, partnerOrgs]);
+
+  /* ---------------------------------------------------------
+     Loading state
+  --------------------------------------------------------- */
+  if (loading || loadingOrgs) {
     return (
       <Group justify="center" mt="xl">
         <Loader size="lg" />
@@ -134,135 +345,298 @@ export function SubmissionsTab({
     );
   }
 
-  return (
-    <Stack gap="xl" align="center">
-      <Stack gap="xs" maw={700} w="100%">
-        <Title order={3}>Project submissions</Title>
-        <Text size="sm" c="dimmed">
-          {project.name}
-        </Text>
-      </Stack>
+  /* ---------------------------------------------------------
+     Reusable card renderer
+  --------------------------------------------------------- */
+  function SubmissionCard({ s }: { s: SubmissionSummary }) {
+    const partnerOrg = getPartnerOrgForSubmission(s);
+    const tabKey = classifySubmission(s, partnerOrg);
 
-      <Card withBorder shadow="sm" radius="md" p="lg" maw={700} w="100%">
-        <Stack gap="lg">
-          <Stack gap={2}>
-            <Text fw={600}>Project-Host</Text>
+    const showDistanceBadge = tabKey === "pending";
+    const badges = getSubmissionBadges(s, partnerOrg, { showDistanceBadge });
 
-            <Group gap={6}>
-              <CountryFlag code={hostCountry} size={20} />
-              <Text size="md">
-                {hostName}{" "}
-                {hostCountry && (
-                  <span style={{ opacity: 0.6 }}>({hostCountry})</span>
-                )}
+    const canDownloadPdf = tabKey === "pending" || tabKey === "approved";
+    const canDelete = (tabKey === "rejected" || tabKey === "abandoned") && !s.submitted;
+
+    // IMPORTANT: per your rule, submitted=true is never deletable.
+    // So in practice:
+    // - Abandoned (submitted=false) deletable ✅
+    // - Rejected (submitted=true) NOT deletable (yet) ❌
+    // If you later allow rejected deletion even when submitted=true, we’ll change here.
+    const canDeleteByRules = tabKey === "abandoned";
+
+    return (
+      <Card
+        key={s.id}
+        withBorder
+        radius="md"
+        p="lg"
+        shadow="sm"
+        maw={700}
+        w="100%"
+      >
+        <Stack gap="md">
+          {/* Header */}
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={2}>
+              <Text fw={600} size="lg">
+                {s.organisation_name}
               </Text>
-            </Group>
-          </Stack>
+              <Group gap={6}>
+                <CountryFlag code={s.country_code} size={18} />
+                <Text size="sm" c="dimmed">
+                  {getCountryLabel(s.country_code)}
+                </Text>
+              </Group>
+            </Stack>
+
+            <Stack gap={4} align="flex-end">
+              {badges.map((b) => (
+                <Badge key={b.key} color={b.color} variant="light" size="lg">
+                  {b.label}
+                </Badge>
+              ))}
+
+              {/* Payment status (ALL tabs) */}
+              {s.payment_status === "paid" ? (
+                <Badge color="green" variant="light">
+                  Paid{" "}
+                  {s.payment_paid_at
+                    ? `(${new Date(s.payment_paid_at).toLocaleDateString()})`
+                    : ""}
+                </Badge>
+              ) : (
+                <Badge color="gray" variant="light">
+                  Not paid
+                </Badge>
+              )}
+            </Stack>
+          </Group>
 
           <Divider />
 
-          <Stack gap={2}>
-            <Text fw={600}>Participating countries</Text>
+          {/* Summary */}
+          <Group gap="md">
+            <Badge variant="outline">{s.participantCount} participants</Badge>
+            <Badge variant="outline">{s.ticketCount} tickets</Badge>
+            <Badge variant="outline">EUR total: {s.totalEur.toFixed(2)}</Badge>
+          </Group>
 
-            <Group gap="sm">
-              {participantCountries.map((code) => (
-                <CountryFlag key={code} code={code} size={26} />
-              ))}
+          <Divider />
 
-              <CountryFlag code={hostCountry} size={26} />
-            </Group>
-          </Stack>
-        </Stack>
-      </Card>
+          {/* Actions */}
+          <Group justify="flex-end" gap="sm">
+            <Button size="xs" variant="light" onClick={() => onOpenSubmission(s)}>
+              View details
+            </Button>
 
-      {submissions.length === 0 && (
-        <Text c="dimmed" maw={700} w="100%">
-          No submissions yet.
-        </Text>
-      )}
-
-      {submissions.map((s) => (
-        <Card
-          key={s.id}
-          withBorder
-          radius="md"
-          p="lg"
-          shadow="sm"
-          maw={700}
-          w="100%"
-        >
-          <Stack gap="md">
-            <Group justify="space-between" align="flex-start">
-              <Stack gap={2}>
-                <Text fw={600} size="lg">
-                  {s.organisation_name}
-                </Text>
-
-                <Group gap={6}>
-                  <CountryFlag code={s.country_code} size={18} />
-                  <Text size="sm" c="dimmed">
-                    {getCountryLabel(s.country_code)}
-                  </Text>
-                </Group>
-              </Stack>
-
-              <Badge
-                color={s.submitted ? "green" : "yellow"}
-                variant="light"
-                size="lg"
-              >
-                {s.submitted ? "Submitted" : "In progress"}
-              </Badge>
-            </Group>
-
-            <Divider />
-
-            <Group gap="md">
-              <Badge variant="outline">
-                {s.participantCount} participants
-              </Badge>
-
-              <Badge variant="outline">{s.ticketCount} tickets</Badge>
-
-              <Badge variant="outline">
-                EUR total: {s.totalEur.toFixed(2)}
-              </Badge>
-
-              <Badge variant="outline">
-                Avg / participant:{" "}
-                {s.participantCount > 0
-                  ? (s.totalEur / s.participantCount).toFixed(2)
-                  : "0.00"}
-              </Badge>
-            </Group>
-
-            <Divider />
-
-            <Group justify="flex-end" gap="sm">
+            {canDownloadPdf && (
               <Button
                 size="xs"
-                variant="light"
-                onClick={() => onOpenSubmission(s)}
+                variant="outline"
+                loading={downloadingId === s.id}
+                onClick={() => handleDownload(s)}
               >
-                View details
+                {downloadingId === s.id ? "Generating…" : "Download admin PDF"}
               </Button>
+            )}
 
-              {s.submitted && (
+            {(tabKey === "pending" || tabKey === "approved") &&
+              (s.claim_status === "approved" || s.claim_status === "adjusted") &&
+              s.payment_status !== "paid" && (
                 <Button
                   size="xs"
-                  variant="outline"
-                  loading={downloadingId === s.id}
-                  onClick={() => handleDownload(s)}
+                  color="green"
+                  onClick={async () => {
+                    const now = new Date().toISOString();
+
+                    await supabase
+                      .from("project_partner_submissions")
+                      .update({
+                        payment_status: "paid",
+                        payment_paid_at: now,
+                      })
+                      .eq("id", s.id);
+
+                    // Update locally (immutable)
+                    setLocalSubmissions((prev) =>
+                      prev.map((x) =>
+                        x.id === s.id
+                          ? { ...x, payment_status: "paid", payment_paid_at: now }
+                          : x
+                      )
+                    );
+                  }}
                 >
-                  {downloadingId === s.id
-                    ? "Generating..."
-                    : "Download PDF"}
+                  Mark as instructed & paid
                 </Button>
               )}
-            </Group>
-          </Stack>
-        </Card>
-      ))}
-    </Stack>
+
+            {(tabKey === "pending" || tabKey === "approved") &&
+              s.payment_status === "paid" && (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="red"
+                  onClick={async () => {
+                    await supabase
+                      .from("project_partner_submissions")
+                      .update({
+                        payment_status: "unpaid",
+                        payment_paid_at: null,
+                      })
+                      .eq("id", s.id);
+
+                    setLocalSubmissions((prev) =>
+                      prev.map((x) =>
+                        x.id === s.id
+                          ? { ...x, payment_status: "unpaid", payment_paid_at: null }
+                          : x
+                      )
+                    );
+                  }}
+                >
+                  Undo payment
+                </Button>
+              )}
+
+            {/* Delete (by your current strict rule: only submitted=false) */}
+            {canDeleteByRules && (
+              <Button
+                size="xs"
+                color="red"
+                variant="light"
+                onClick={() => openDeleteModal(s)}
+              >
+                Delete
+              </Button>
+            )}
+          </Group>
+        </Stack>
+      </Card>
+    );
+  }
+
+  /* ---------------------------------------------------------
+     Render tab content
+  --------------------------------------------------------- */
+  function RenderTabList({ items }: { items: SubmissionSummary[] }) {
+    if (items.length === 0) {
+      return (
+        <Alert color="gray" variant="light" maw={700} w="100%">
+          No submissions in this category.
+        </Alert>
+      );
+    }
+
+    return (
+      <Stack gap="md" align="center" w="100%">
+        {items.map((s) => (
+          <SubmissionCard key={s.id} s={s} />
+        ))}
+      </Stack>
+    );
+  }
+
+  /* ---------------------------------------------------------
+     RENDER
+  --------------------------------------------------------- */
+  return (
+    <>
+      {/* Delete confirm modal */}
+      <Modal
+        opened={deleteOpen}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteOpen(false);
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        title="Delete submission?"
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            This will permanently delete the submission and all related data
+            (participants, tickets, assignments). This cannot be undone.
+          </Text>
+
+          {deleteTarget && (
+            <Alert color="yellow" variant="light">
+              <Text size="sm" fw={600}>
+                {deleteTarget.organisation_name}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Submission ID: {deleteTarget.id}
+              </Text>
+            </Alert>
+          )}
+
+          {deleteError && <Alert color="red">{deleteError}</Alert>}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                if (!deleting) {
+                  setDeleteOpen(false);
+                  setDeleteTarget(null);
+                  setDeleteError(null);
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button color="red" loading={deleting} onClick={confirmDelete}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Stack gap="xl" align="center">
+        <Stack gap="xs" maw={700} w="100%">
+          <Title order={3}>Project submissions</Title>
+          <Text size="sm" c="dimmed">
+            {project.name}
+          </Text>
+        </Stack>
+
+        {/* Nested tabs */}
+        <Tabs defaultValue="pending" maw={700} w="100%">
+          <Tabs.List>
+            <Tabs.Tab value="pending">
+              Pending ({grouped.pending.length})
+            </Tabs.Tab>
+            <Tabs.Tab value="approved">
+              Approved ({grouped.approved.length})
+            </Tabs.Tab>
+            <Tabs.Tab value="rejected">
+              Rejected ({grouped.rejected.length})
+            </Tabs.Tab>
+            <Tabs.Tab value="abandoned">
+              Abandoned ({grouped.abandoned.length})
+            </Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="pending" pt="md">
+            <RenderTabList items={grouped.pending} />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="approved" pt="md">
+            <RenderTabList items={grouped.approved} />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="rejected" pt="md">
+            <RenderTabList items={grouped.rejected} />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="abandoned" pt="md">
+            <RenderTabList items={grouped.abandoned} />
+          </Tabs.Panel>
+        </Tabs>
+      </Stack>
+    </>
   );
 }

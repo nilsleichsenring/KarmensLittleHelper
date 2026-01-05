@@ -16,9 +16,11 @@ import {
   Text,
   TextInput,
   Title,
+  Radio,
 } from "@mantine/core";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
+
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 
@@ -27,27 +29,43 @@ type Participant = {
   full_name: string;
 };
 
+type TripType = "oneway" | "return" | "roundtrip";
+
+type TravelMode =
+  | "bus"
+  | "carpooling"
+  | "car"
+  | "flight"
+  | "ship"
+  | "train"
+  | "other";
+
 type Ticket = {
   id: string;
   from_location: string;
   to_location: string;
-  travel_mode: string;
+  travel_mode: TravelMode;
   currency: string;
   amount_eur: number;
   amount_original: number | null;
   file_url: string;
+  trip_type: TripType | null;
 };
+
 
 type TicketWithParticipants = Ticket & {
   participantIds: string[];
 };
 
 const MODE_OPTIONS = [
-  { value: "Flight", label: "Flight" },
-  { value: "Train", label: "Train" },
-  { value: "Bus", label: "Bus" },
-  { value: "Other", label: "Other" },
-];
+  { value: "bus", label: "Bus" },
+  { value: "carpooling", label: "Carpooling" },
+  { value: "car", label: "Car / Motorbike" },
+  { value: "flight", label: "Plane" }, // 🔥 exakt das erwartet travel.ts
+  { value: "ship", label: "Ship" },
+  { value: "train", label: "Train" },
+  { value: "other", label: "Other" },
+] as const;
 
 const CURRENCY_OPTIONS = [
   { value: "EUR", label: "EUR" },
@@ -64,6 +82,14 @@ const CURRENCY_OPTIONS = [
   { value: "GBP", label: "GBP" },
 ];
 
+function formatTripType(tt: TripType | null): string {
+  if (!tt) return "—";
+  if (tt === "oneway") return "One-way";
+  if (tt === "return") return "Return";
+  if (tt === "roundtrip") return "Roundtrip";
+  return "—";
+}
+
 export default function PartnerTicketsPage() {
   const { projectToken } = useParams<{ projectToken: string }>();
   const navigate = useNavigate();
@@ -78,16 +104,23 @@ export default function PartnerTicketsPage() {
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingTicket, setEditingTicket] = useState<TicketWithParticipants | null>(null);
+  const [editingTicket, setEditingTicket] =
+    useState<TicketWithParticipants | null>(null);
 
   // Form State
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
-  const [mode, setMode] = useState<string | null>(null);
+  const [mode, setMode] = useState<TravelMode | null>(null);
+
+  // NEW: Trip type
+  const [tripType, setTripType] = useState<TripType>("oneway");
+
   const [currency, setCurrency] = useState<string | null>("EUR");
   const [amountOriginal, setAmountOriginal] = useState("");
   const [amountEur, setAmountEur] = useState("");
-  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<
+    string[]
+  >([]);
   const [file, setFile] = useState<File | null>(null);
   const [existingFileUrl, setExistingFileUrl] = useState<string | null>(null);
 
@@ -156,7 +189,20 @@ export default function PartnerTicketsPage() {
         return;
       }
 
-      const ticketsBase = (ticketRows || []) as Ticket[];
+      const rawTickets = (ticketRows || []) as any[];
+
+      const ticketsBase: Ticket[] = rawTickets.map((t) => ({
+        id: t.id,
+        from_location: t.from_location,
+        to_location: t.to_location,
+        travel_mode: t.travel_mode,
+        currency: t.currency,
+        amount_eur: t.amount_eur,
+        amount_original: t.amount_original,
+        file_url: t.file_url,
+        trip_type: (t.trip_type as TripType | null) ?? null,
+      }));
+
       if (ticketsBase.length === 0) {
         setTickets([]);
         setLoading(false);
@@ -208,6 +254,7 @@ export default function PartnerTicketsPage() {
     setFromLocation("");
     setToLocation("");
     setMode(null);
+    setTripType("oneway");
     setCurrency("EUR");
     setAmountOriginal("");
     setAmountEur("");
@@ -228,6 +275,7 @@ export default function PartnerTicketsPage() {
     setFromLocation(ticket.from_location);
     setToLocation(ticket.to_location);
     setMode(ticket.travel_mode);
+    setTripType(ticket.trip_type ?? "oneway");
     setCurrency(ticket.currency);
     setAmountOriginal(ticket.amount_original?.toString() ?? "");
     setAmountEur(ticket.amount_eur.toString());
@@ -251,6 +299,7 @@ export default function PartnerTicketsPage() {
     if (!toLocation.trim()) return setErrorMessage("Please enter To.");
     if (!mode) return setErrorMessage("Please select a mode of travel.");
     if (!currency) return setErrorMessage("Please select a currency.");
+    if (!tripType) return setErrorMessage("Please select a trip type.");
     if (selectedParticipantIds.length === 0)
       return setErrorMessage("Please assign at least one participant.");
 
@@ -259,8 +308,7 @@ export default function PartnerTicketsPage() {
     let eur = amountEur.trim();
 
     if (currency === "EUR") {
-      if (!eur)
-        return setErrorMessage("Please enter the amount in EUR.");
+      if (!eur) return setErrorMessage("Please enter the amount in EUR.");
       original = ""; // not used
     } else {
       if (!original || !eur)
@@ -271,16 +319,16 @@ export default function PartnerTicketsPage() {
 
     // Convert to numbers
     const originalNumber =
-      currency === "EUR"
-        ? null
-        : Number(original.replace(",", "."));
+      currency === "EUR" ? null : Number(original.replace(",", "."));
 
-    if (originalNumber !== null && isNaN(originalNumber))
+    if (originalNumber !== null && isNaN(originalNumber)) {
       return setErrorMessage("Original amount is not a valid number.");
+    }
 
     const eurNumber = Number(eur.replace(",", "."));
-    if (isNaN(eurNumber))
+    if (isNaN(eurNumber)) {
       return setErrorMessage("EUR amount is not a valid number.");
+    }
 
     // File handling
     if (!editingTicket && !file)
@@ -327,10 +375,11 @@ export default function PartnerTicketsPage() {
             from_location: fromLocation.trim(),
             to_location: toLocation.trim(),
             travel_mode: mode,
-            currency,
+            currency_code: currency,
             amount_original: originalNumber,
             amount_eur: eurNumber,
             file_url: fileUrlToUse,
+            trip_type: tripType,
           })
           .select()
           .single();
@@ -342,7 +391,19 @@ export default function PartnerTicketsPage() {
           return;
         }
 
-        const newTicket = newTicketData as Ticket;
+        const newTicketRow = newTicketData as any;
+        const newTicket: TicketWithParticipants = {
+          id: newTicketRow.id,
+          from_location: newTicketRow.from_location,
+          to_location: newTicketRow.to_location,
+          travel_mode: newTicketRow.travel_mode,
+          currency: newTicketRow.currency,
+          amount_original: newTicketRow.amount_original,
+          amount_eur: newTicketRow.amount_eur,
+          file_url: newTicketRow.file_url,
+          trip_type: (newTicketRow.trip_type as TripType | null) ?? tripType,
+          participantIds: [...selectedParticipantIds],
+        };
 
         // Insert participant links
         const newLinks = selectedParticipantIds.map((pid) => ({
@@ -361,13 +422,7 @@ export default function PartnerTicketsPage() {
           return;
         }
 
-        setTickets((prev) => [
-          ...prev,
-          {
-            ...newTicket,
-            participantIds: [...selectedParticipantIds],
-          },
-        ]);
+        setTickets((prev) => [...prev, newTicket]);
 
         setModalOpen(false);
         setSaving(false);
@@ -385,6 +440,7 @@ export default function PartnerTicketsPage() {
           amount_original: originalNumber,
           amount_eur: eurNumber,
           file_url: fileUrlToUse,
+          trip_type: tripType,
         })
         .eq("id", editingTicket.id);
 
@@ -396,7 +452,10 @@ export default function PartnerTicketsPage() {
       }
 
       // Update participant links
-      await supabase.from("ticket_participants").delete().eq("ticket_id", editingTicket.id);
+      await supabase
+        .from("ticket_participants")
+        .delete()
+        .eq("ticket_id", editingTicket.id);
 
       const newLinks = selectedParticipantIds.map((pid) => ({
         ticket_id: editingTicket.id,
@@ -418,6 +477,7 @@ export default function PartnerTicketsPage() {
                 amount_original: originalNumber,
                 amount_eur: eurNumber,
                 file_url: fileUrlToUse!,
+                trip_type: tripType,
                 participantIds: [...selectedParticipantIds],
               }
             : t
@@ -437,7 +497,10 @@ export default function PartnerTicketsPage() {
   // Delete ticket
   // --------------------------------------------------
   async function handleDeleteTicket(ticketId: string) {
-    await supabase.from("ticket_participants").delete().eq("ticket_id", ticketId);
+    await supabase
+      .from("ticket_participants")
+      .delete()
+      .eq("ticket_id", ticketId);
     await supabase.from("tickets").delete().eq("id", ticketId);
     setTickets((prev) => prev.filter((t) => t.id !== ticketId));
   }
@@ -478,7 +541,7 @@ export default function PartnerTicketsPage() {
         <Stack gap="xl">
           <Stack gap={4}>
             <Text size="sm" c="dimmed">
-              Step 5
+              Step 6 of 7
             </Text>
             <Title order={2}>Travel tickets</Title>
           </Stack>
@@ -487,6 +550,7 @@ export default function PartnerTicketsPage() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Route</Table.Th>
+                <Table.Th>Type</Table.Th>
                 <Table.Th>Mode</Table.Th>
                 <Table.Th>EUR</Table.Th>
                 <Table.Th>Participants</Table.Th>
@@ -496,7 +560,10 @@ export default function PartnerTicketsPage() {
             <Table.Tbody>
               {tickets.map((t) => (
                 <Table.Tr key={t.id}>
-                  <Table.Td>{t.from_location} → {t.to_location}</Table.Td>
+                  <Table.Td>
+                    {t.from_location} → {t.to_location}
+                  </Table.Td>
+                  <Table.Td>{formatTripType(t.trip_type)}</Table.Td>
                   <Table.Td>{t.travel_mode}</Table.Td>
                   <Table.Td>{t.amount_eur.toFixed(2)}</Table.Td>
                   <Table.Td>
@@ -510,7 +577,11 @@ export default function PartnerTicketsPage() {
                   </Table.Td>
                   <Table.Td>
                     <Group gap={6}>
-                      <Button size="xs" variant="subtle" onClick={() => openEditModal(t)}>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        onClick={() => openEditModal(t)}
+                      >
                         Edit
                       </Button>
                       <Button
@@ -527,7 +598,7 @@ export default function PartnerTicketsPage() {
               ))}
               {tickets.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={5} style={{ textAlign: "center" }}>
+                  <Table.Td colSpan={6} style={{ textAlign: "center" }}>
                     No tickets added yet.
                   </Table.Td>
                 </Table.Tr>
@@ -535,7 +606,7 @@ export default function PartnerTicketsPage() {
             </Table.Tbody>
           </Table>
 
-          <Group justify="space-between">
+          <Group justify="space-between" align="flex-start">
             <Button onClick={openAddModal}>+ Add ticket</Button>
 
             {errorMessage && <Alert color="red">{errorMessage}</Alert>}
@@ -575,20 +646,37 @@ export default function PartnerTicketsPage() {
             </Group>
 
             <Select
-              label="Mode of travel"
+              label="Means of travel"
               placeholder="Select mode"
               data={MODE_OPTIONS}
               value={mode}
-              onChange={setMode}
+              onChange={(value) => {
+                setMode(value as TravelMode | null);
+              }}
               withAsterisk
             />
+
+
+            {/* NEW: Trip type */}
+            <Radio.Group
+              label="Trip type"
+              value={tripType}
+              onChange={(value) => setTripType(value as TripType)}
+              withAsterisk
+            >
+              <Group mt="xs">
+                <Radio value="oneway" label="One-way" />
+                <Radio value="return" label="Return" />
+                <Radio value="roundtrip" label="Roundtrip" />
+              </Group>
+            </Radio.Group>
           </Stack>
 
           {/* Currency & amounts */}
           <Stack gap="xs">
             <Title order={5}>Amounts</Title>
 
-            <Group grow>
+            <Group grow align="flex-end">
               <Select
                 label="Currency"
                 data={CURRENCY_OPTIONS}
@@ -622,8 +710,9 @@ export default function PartnerTicketsPage() {
             </Group>
 
             <Text size="xs" c="dimmed">
-              For EUR tickets, only the EUR amount is required.  
-              For all other currencies, both fields are required.
+              If the ticket is in EUR, only the amount in EUR is required. If you
+              choose another currency, please provide both the original amount and
+              the converted amount in EUR.
             </Text>
           </Stack>
 

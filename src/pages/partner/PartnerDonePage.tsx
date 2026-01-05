@@ -12,6 +12,7 @@ type SubmissionInfo = {
 };
 
 export default function PartnerDonePage() {
+  const [submission, setSubmission] = useState<any | null>(null);
   const { projectToken } = useParams<{ projectToken: string }>();
 
   const [info, setInfo] = useState<SubmissionInfo | null>(null);
@@ -54,6 +55,22 @@ export default function PartnerDonePage() {
     load();
   }, [projectToken]);
 
+  useEffect(() => {
+    const key = "partner_submission_" + projectToken;
+    const submissionId = localStorage.getItem(key);
+
+    if (!submissionId) return;
+
+    supabase
+      .from("project_partner_submissions")
+      .select("*")
+      .eq("id", submissionId)
+      .single()
+      .then(({ data }) => {
+        setSubmission(data);
+      });
+  }, [projectToken]);
+
   // -------------------------------------------
   // LOADING SCREEN
   // -------------------------------------------
@@ -75,15 +92,29 @@ export default function PartnerDonePage() {
   // -------------------------------------------
   // PAGE CONTENT
   // -------------------------------------------
+  
+  // Helper set first name
+  const contactFirstName = submission?.contact_name
+  ? submission.contact_name.split(" ")[0]
+  : null;
+
+
+
+
+
   return (
     <Box style={{ minHeight: "100vh" }} bg="#f5f6fa">
       <Container size="sm" py="xl">
         <Stack gap="xl">
           {/* Header */}
           <Stack gap={4}>
-            <Title order={2}>Thank you!</Title>
+            <Title order={2}>
+              Thank you{contactFirstName ? `, ${contactFirstName}` : ""}!
+            </Title>
+
+
             <Text size="sm" c="dimmed">
-              Your submission has been received.  
+              Your reimbursement claim has been received.  
               The host organisation will contact you if anything is missing.
             </Text>
           </Stack>

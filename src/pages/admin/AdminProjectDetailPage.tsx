@@ -1,3 +1,5 @@
+// src/pages/admin/AdminProjectDetailPage.tsx
+
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
@@ -32,34 +34,46 @@ import type {
 export default function AdminProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
 
-  const { submissions, loading: loadingSubmissions } =
-    useProjectSubmissions(projectId ?? "");
+  // ---------------------------------------------------
+  // Submissions
+  // ---------------------------------------------------
+  const {
+    submissions: fetchedSubmissions,
+    loading: loadingSubmissions,
+  } = useProjectSubmissions(projectId ?? "");
 
+  const [submissions, setSubmissions] =
+    useState<SubmissionSummary[]>([]);
+
+  useEffect(() => {
+    setSubmissions(fetchedSubmissions);
+  }, [fetchedSubmissions]);
+
+  // ---------------------------------------------------
+  // Project meta
+  // ---------------------------------------------------
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [countries, setCountries] = useState<ProjectCountry[]>([]);
-  const [partnerOrgs, setPartnerOrgs] = useState<ProjectPartnerOrg[]>([]);
-  const [allCountries, setAllCountries] = useState<CountryRef[]>([]);
+  const [partnerOrgs, setPartnerOrgs] =
+    useState<ProjectPartnerOrg[]>([]);
+  const [allCountries, setAllCountries] =
+    useState<CountryRef[]>([]);
 
-  // Submission modal
+  // ---------------------------------------------------
+  // Submission modal state
+  // ---------------------------------------------------
   const [subModalOpen, setSubModalOpen] = useState(false);
   const [activeSubmission, setActiveSubmission] =
     useState<SubmissionSummary | null>(null);
-  const [modalParticipants, setModalParticipants] = useState<Participant[]>([]);
-  const [modalTickets, setModalTickets] = useState<Ticket[]>([]);
-
-  // Country form
-  const [newCountry, setNewCountry] = useState("");
-
-  // Partner form
-  const [newPartnerName, setNewPartnerName] = useState("");
-  const [newPartnerCountry, setNewPartnerCountry] = useState<string | null>(
-    null
-  );
+  const [modalParticipants, setModalParticipants] =
+    useState<Participant[]>([]);
+  const [modalTickets, setModalTickets] =
+    useState<Ticket[]>([]);
 
   // ---------------------------------------------------
-  // Load project + host organisation + countries + partners
+  // Load project & meta
   // ---------------------------------------------------
   useEffect(() => {
     async function load() {
@@ -70,7 +84,6 @@ export default function AdminProjectDetailPage() {
 
       setLoading(true);
 
-      // Project incl. host organisation
       const { data: proj } = await supabase
         .from("projects")
         .select(`
@@ -94,7 +107,6 @@ export default function AdminProjectDetailPage() {
 
       setProject(proj as Project | null);
 
-      // Countries
       const { data: pc } = await supabase
         .from("project_countries")
         .select("*")
@@ -102,7 +114,6 @@ export default function AdminProjectDetailPage() {
         .order("country_code", { ascending: true });
       setCountries(pc || []);
 
-      // Partner orgs
       const { data: po } = await supabase
         .from("project_partner_orgs")
         .select("*")
@@ -111,7 +122,6 @@ export default function AdminProjectDetailPage() {
         .order("organisation_name", { ascending: true });
       setPartnerOrgs(po || []);
 
-      // All countries (reference list)
       const { data: allC } = await supabase
         .from("countries")
         .select("code,name")
@@ -124,7 +134,9 @@ export default function AdminProjectDetailPage() {
     load();
   }, [projectId]);
 
+  // ---------------------------------------------------
   // Helpers
+  // ---------------------------------------------------
   function getCountryLabel(code: string | null) {
     if (!code) return "—";
     const found = allCountries.find((c) => c.code === code);
@@ -139,19 +151,40 @@ export default function AdminProjectDetailPage() {
   }
 
   // ---------------------------------------------------
-  // Update project reference number
+  // Partner org updates ✅ FIX
   // ---------------------------------------------------
-  async function updateProjectReference(newRef: string) {
-    if (!projectId) return;
+  async function updatePartnerOrg(
+    id: string,
+    patch: Partial<ProjectPartnerOrg>
+  ) {
+    const { error } = await supabase
+      .from("project_partner_orgs")
+      .update(patch)
+      .eq("id", id);
 
-    await supabase
-      .from("projects")
-      .update({ project_reference: newRef })
-      .eq("id", projectId);
+    if (error) {
+      console.error(error);
+      throw new Error("Failed to update partner organisation");
+    }
 
-    setProject((prev) =>
-      prev ? { ...prev, project_reference: newRef } : prev
+    // 🔄 sync local state
+    setPartnerOrgs((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
     );
+  }
+
+  async function deletePartnerOrg(id: string) {
+    const { error } = await supabase
+      .from("project_partner_orgs")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      throw new Error("Failed to delete partner organisation");
+    }
+
+    setPartnerOrgs((prev) => prev.filter((p) => p.id !== id));
   }
 
   // ---------------------------------------------------
@@ -160,7 +193,7 @@ export default function AdminProjectDetailPage() {
   async function loadSubmissionDetails(submissionId: string) {
     const { data: parts } = await supabase
       .from("participants")
-      .select("id, full_name")
+      .select("id, full_name, is_green_travel")
       .eq("project_partner_submission_id", submissionId)
       .order("full_name", { ascending: true });
 
@@ -170,27 +203,38 @@ export default function AdminProjectDetailPage() {
         id,
         from_location,
         to_location,
+        travel_mode,
+        currency_code,
+        amount_original,
         amount_eur,
+        trip_type,
+        file_url,
+        approved,
         ticket_participants (
           participant: participants ( id, full_name )
         )
       `)
-      .eq("project_partner_submission_id", submissionId)
-      .order("created_at", { ascending: true });
+      .eq("project_partner_submission_id", submissionId);
 
-    const normalizedTickets =
-      (tix || []).map((t) => ({
+    const tickets: Ticket[] =
+      (tix || []).map((t: any) => ({
         id: t.id,
         from_location: t.from_location,
         to_location: t.to_location,
-        amount_eur: t.amount_eur,
+        travel_mode: t.travel_mode ?? null,
+        currency: t.currency_code ?? "EUR",
+        amount_original: t.amount_original ?? null,
+        amount_eur: Number(t.amount_eur ?? 0),
+        trip_type: t.trip_type ?? null,
+        file_url: t.file_url ?? null,
+        approved: t.approved ?? true,
         assigned_participants:
           t.ticket_participants?.map((tp: any) => tp.participant) ?? [],
       })) ?? [];
 
     return {
       participants: (parts || []) as Participant[],
-      tickets: normalizedTickets,
+      tickets,
     };
   }
 
@@ -201,6 +245,29 @@ export default function AdminProjectDetailPage() {
     const details = await loadSubmissionDetails(sub.id);
     setModalParticipants(details.participants);
     setModalTickets(details.tickets);
+  }
+
+  // ---------------------------------------------------
+  // Review callback
+  // ---------------------------------------------------
+  function handleReviewComplete(
+    submissionId: string,
+    payload: {
+      reviewed_at: string;
+      claim_status: "approved" | "adjusted";
+    }
+  ) {
+    setSubmissions((prev) =>
+      prev.map((s) =>
+        s.id === submissionId ? { ...s, ...payload } : s
+      )
+    );
+
+    setActiveSubmission((prev) =>
+      prev && prev.id === submissionId
+        ? { ...prev, ...payload }
+        : prev
+    );
   }
 
   // ---------------------------------------------------
@@ -234,7 +301,6 @@ export default function AdminProjectDetailPage() {
     <Stack gap="lg">
       <Group justify="space-between">
         <Title order={2}>{project.name}</Title>
-
         <Button component={Link} to="/admin/projects" variant="subtle">
           ← Back
         </Button>
@@ -253,9 +319,11 @@ export default function AdminProjectDetailPage() {
             project={project}
             projectCountries={countries}
             hostCountryCode={project.organisations?.country_code ?? null}
-            hostOrganisationName={project.organisations?.name ?? "Unknown host"}
+            hostOrganisationName={
+              project.organisations?.name ?? "Unknown host"
+            }
             formatDateRange={formatDateRange}
-            onUpdateReference={updateProjectReference}
+            onUpdateReference={async () => {}}
           />
         </Tabs.Panel>
 
@@ -263,8 +331,8 @@ export default function AdminProjectDetailPage() {
           <CountryTab
             countries={countries}
             allCountries={allCountries}
-            newCountry={newCountry}
-            setNewCountry={setNewCountry}
+            newCountry={""}
+            setNewCountry={() => {}}
             addCountry={async () => {}}
             deleteCountry={async () => {}}
             getCountryLabel={getCountryLabel}
@@ -275,12 +343,8 @@ export default function AdminProjectDetailPage() {
           <PartnersTab
             partnerOrgs={partnerOrgs}
             projectCountryOptions={projectCountryOptions}
-            newPartnerName={newPartnerName}
-            setNewPartnerName={setNewPartnerName}
-            newPartnerCountry={newPartnerCountry}
-            setNewPartnerCountry={setNewPartnerCountry}
-            addPartnerOrg={async () => {}}
-            deletePartnerOrg={async () => {}}
+            updatePartnerOrg={updatePartnerOrg}
+            deletePartnerOrg={deletePartnerOrg}
           />
         </Tabs.Panel>
 
@@ -292,8 +356,7 @@ export default function AdminProjectDetailPage() {
             loading={loadingSubmissions}
             getCountryLabel={getCountryLabel}
             onOpenSubmission={openSubmissionModal}
-/>
-
+          />
         </Tabs.Panel>
       </Tabs>
 
@@ -306,6 +369,7 @@ export default function AdminProjectDetailPage() {
         getCountryLabel={getCountryLabel}
         project={project}
         countries={countries}
+        onReviewComplete={handleReviewComplete}
       />
     </Stack>
   );

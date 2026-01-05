@@ -7,13 +7,13 @@ import {
   Container,
   Loader,
   Stack,
+  Text,
   TextInput,
   Title,
-  Text,
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
 
-const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
+const STORAGE_PREFIX = "partner_submission_";
 
 export default function PartnerContactPage() {
   const { projectToken } = useParams<{ projectToken: string }>();
@@ -26,23 +26,22 @@ export default function PartnerContactPage() {
   const [contactEmail, setContactEmail] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // --------------------------------------------------------------------
-  // Load submissionId from localStorage
-  // --------------------------------------------------------------------
+  /* --------------------------------------------------
+     Load submissionId from localStorage
+  -------------------------------------------------- */
   useEffect(() => {
     if (!projectToken) {
-      setErrorMessage("Invalid access link.");
+      setError("Invalid access link.");
       setLoading(false);
       return;
     }
 
-    const key = SUBMISSION_STORAGE_PREFIX + projectToken;
-    const stored = localStorage.getItem(key);
+    const stored = localStorage.getItem(STORAGE_PREFIX + projectToken);
 
     if (!stored) {
-      setErrorMessage("No submission found. Please start again.");
+      setError("No active submission found. Please start again.");
       setLoading(false);
       return;
     }
@@ -50,9 +49,9 @@ export default function PartnerContactPage() {
     setSubmissionId(stored);
   }, [projectToken]);
 
-  // --------------------------------------------------------------------
-  // Load existing contact info
-  // --------------------------------------------------------------------
+  /* --------------------------------------------------
+     Load existing contact data
+  -------------------------------------------------- */
   useEffect(() => {
     async function load() {
       if (!submissionId) return;
@@ -65,7 +64,7 @@ export default function PartnerContactPage() {
 
       if (error) {
         console.error(error);
-        setErrorMessage("Could not load contact data.");
+        setError("Could not load contact information.");
         setLoading(false);
         return;
       }
@@ -79,27 +78,26 @@ export default function PartnerContactPage() {
     load();
   }, [submissionId]);
 
-  // --------------------------------------------------------------------
-  // Save + Continue
-  // --------------------------------------------------------------------
+  /* --------------------------------------------------
+     Save & continue
+  -------------------------------------------------- */
   async function handleContinue() {
     if (!submissionId) return;
 
-    setErrorMessage(null);
+    setError(null);
 
     if (!contactName.trim()) {
-      setErrorMessage("Contact person name is required.");
+      setError("Contact person name is required.");
       return;
     }
 
     if (!contactEmail.trim()) {
-      setErrorMessage("Email is required.");
+      setError("Email address is required.");
       return;
     }
 
-    // Basic email validation
     if (!/^\S+@\S+\.\S+$/.test(contactEmail)) {
-      setErrorMessage("Please enter a valid email address.");
+      setError("Please enter a valid email address.");
       return;
     }
 
@@ -117,29 +115,16 @@ export default function PartnerContactPage() {
 
     if (error) {
       console.error(error);
-      setErrorMessage("Could not save contact information.");
+      setError("Could not save contact information.");
       return;
     }
 
-    // Weiter zur Bank Page
     navigate(`/p/${projectToken}/bank`);
   }
 
-  // --------------------------------------------------------------------
-  // Reset for testing (clears local storage + back to setup)
-  // --------------------------------------------------------------------
-  function handleResetForTesting() {
-    if (!projectToken) return;
-
-    const key = SUBMISSION_STORAGE_PREFIX + projectToken;
-    localStorage.removeItem(key);
-
-    navigate(`/p/${projectToken}`, { replace: true });
-  }
-
-  // --------------------------------------------------------------------
-  // Rendering
-  // --------------------------------------------------------------------
+  /* --------------------------------------------------
+     Render
+  -------------------------------------------------- */
   if (loading) {
     return (
       <Box
@@ -155,12 +140,12 @@ export default function PartnerContactPage() {
     );
   }
 
-  if (errorMessage) {
+  if (error && !submissionId) {
     return (
       <Container size="sm" py="xl">
-        <Stack gap="md">
+        <Stack>
           <Title order={2}>Contact person</Title>
-          <Alert color="red">{errorMessage}</Alert>
+          <Alert color="red">{error}</Alert>
         </Stack>
       </Container>
     );
@@ -172,19 +157,19 @@ export default function PartnerContactPage() {
         <Stack gap="xl">
           <Stack gap={4}>
             <Text size="sm" c="dimmed">
-              Step 2
+              Step 3 of 7
             </Text>
             <Title order={2}>Contact person</Title>
-
             <Text size="sm" c="dimmed">
-              Please provide the main contact person for this project.
+              Please provide the main contact person for this reimbursement
+              claim.
             </Text>
           </Stack>
 
           <Stack gap="sm">
             <TextInput
               label="Full name"
-              placeholder="John Smith"
+              placeholder="Jane Doe"
               value={contactName}
               onChange={(e) => setContactName(e.currentTarget.value)}
               withAsterisk
@@ -192,32 +177,21 @@ export default function PartnerContactPage() {
 
             <TextInput
               label="Email"
-              placeholder="name@example.com"
+              placeholder="name@example.org"
               value={contactEmail}
               onChange={(e) => setContactEmail(e.currentTarget.value)}
               withAsterisk
             />
 
-            {errorMessage && (
-              <Alert color="red" mt="sm">
-                <Text>{errorMessage}</Text>
+            {error && (
+              <Alert color="red">
+                <Text size="sm">{error}</Text>
               </Alert>
             )}
 
-            <Button mt="md" onClick={handleContinue} loading={saving}>
+            <Button onClick={handleContinue} loading={saving}>
               Continue
             </Button>
-
-            {/* Testing-only reset link */}
-            <Text
-              size="xs"
-              c="dimmed"
-              ta="center"
-              style={{ cursor: "pointer" }}
-              onClick={handleResetForTesting}
-            >
-              Reset this submission (testing)
-            </Text>
           </Stack>
         </Stack>
       </Container>

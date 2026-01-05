@@ -1,319 +1,235 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "../../lib/supabaseClient";
 import {
+  Alert,
+  Box,
   Button,
-  Card,
-  Group,
+  Container,
   Loader,
   Select,
   Stack,
   Text,
   TextInput,
   Title,
+  Group,
 } from "@mantine/core";
+import { supabase } from "../../lib/supabaseClient";
+import { countryCodeToName } from "../../lib/flags";
 
-type Project = {
-  id: string;
-  name: string;
-  organisation_id: string | null;
-  start_date: string | null;
-  end_date: string | null;
-};
+const STORAGE_PREFIX = "partner_submission_";
 
-type ProjectCountry = {
-  country_code: string;
-};
-
-type PartnerOrg = {
-  id: string;
-  organisation_name: string;
-  country_code: string | null;
-};
+/** Flag image helper (FILES ARE UPPERCASE: /flags/DE.svg) */
+function flagUrl(code: string | null) {
+  if (!code) return undefined;
+  return `/flags/${code.toUpperCase()}.svg`;
+}
 
 export default function PartnerSetupPage() {
-  const { projectToken } = useParams();
+  const { projectToken } = useParams<{ projectToken: string }>();
   const navigate = useNavigate();
 
+  const [projectId, setProjectId] = useState<string | null>(null);
+
+  const [countryOptions, setCountryOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+
+  const [country, setCountry] = useState<string | null>(null);
+  const [organisationName, setOrganisationName] = useState("");
+
   const [loading, setLoading] = useState(true);
-
-  const [project, setProject] = useState<Project | null>(null);
-  const [countries, setCountries] = useState<ProjectCountry[]>([]);
-  const [partnerOrgs, setPartnerOrgs] = useState<PartnerOrg[]>([]);
-
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [selectedOrgDropdown, setSelectedOrgDropdown] = useState<string | null>(
-    null
-  );
-  const [freeOrg, setFreeOrg] = useState("");
-
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // -------------------------------------------------------------
-  // Load project + countries + host-defined partner orgs
-  // -------------------------------------------------------------
+  /* --------------------------------------------------
+     Load project + allowed countries
+  -------------------------------------------------- */
   useEffect(() => {
     async function load() {
       if (!projectToken) {
+        setError("Invalid project link.");
         setLoading(false);
         return;
       }
 
-      setLoading(true);
-
-      const projectId = projectToken;
-
-      // 0) Check submission in localStorage
-      const existingSubmissionId = localStorage.getItem(
-        `partner_submission_${projectId}`
-      );
-      if (existingSubmissionId) {
-        navigate(`/p/${projectId}/contact`);
-        return;
-      }
-
-      // 1) Load project
-      const { data: proj, error: projError } = await supabase
+      // 1) Load project (invite link currently uses project.id)
+      const { data: project, error: pErr } = await supabase
         .from("projects")
-        .select("*")
-        .eq("id", projectId)
+        .select("id")
+        .eq("id", projectToken)
         .single();
 
-      if (projError || !proj) {
-        console.error("Error loading project", projError);
-        setProject(null);
+      if (pErr || !project) {
+        setError("Invalid or expired project link.");
         setLoading(false);
         return;
       }
 
-      setProject(proj as Project);
+      setProjectId(project.id);
 
-      // 2) Load countries
-      const { data: pc, error: pcError } = await supabase
+      // 2) Load allowed countries for this project
+      const { data: countries, error: cErr } = await supabase
         .from("project_countries")
         .select("country_code")
-        .eq("project_id", projectId);
+        .eq("project_id", project.id)
+        .order("country_code");
 
-      if (pcError) {
-        console.error("Error loading project countries", pcError);
-        setCountries([]);
-      } else {
-        setCountries((pc || []) as ProjectCountry[]);
+      if (cErr) {
+        console.error(cErr);
+        setError("Could not load project countries.");
+        setLoading(false);
+        return;
       }
 
-      // 3) Load partner orgs
-      const { data: po, error: poError } = await supabase
-        .from("project_partner_orgs")
-        .select("*")
-        .eq("project_id", projectId);
-
-      if (poError) {
-        console.error("Error loading partner orgs", poError);
-        setPartnerOrgs([]);
-      } else {
-        setPartnerOrgs((po || []) as PartnerOrg[]);
-      }
+      setCountryOptions(
+        (countries || []).map((c) => ({
+          value: c.country_code,
+          label: countryCodeToName(c.country_code, "en"),
+        }))
+      );
 
       setLoading(false);
     }
 
     load();
-  }, [projectToken, navigate]);
+  }, [projectToken]);
 
-  // -------------------------------------------------------------
-  // Filter orgs for selected country
-  // -------------------------------------------------------------
-  const orgsForCountry = selectedCountry
-    ? partnerOrgs.filter((o) => o.country_code === selectedCountry)
-    : [];
-
-  // -------------------------------------------------------------
-  // SAVE SETUP
-  // -------------------------------------------------------------
+  /* --------------------------------------------------
+     Create submission (Mini-Setup)
+  -------------------------------------------------- */
   async function handleContinue() {
-    if (!project || !selectedCountry) return;
+    if (!projectId) return;
+
+    setError(null);
+
+    if (!country) {
+      setError("Please select your country.");
+      return;
+    }
+
+    if (!organisationName.trim()) {
+      setError("Organisation name is required.");
+      return;
+    }
 
     setSaving(true);
 
-    let finalOrgName: string;
-
-    // Host-defined ORGs exist for this country
-    if (orgsForCountry.length > 0) {
-      if (selectedOrgDropdown === "other") {
-        if (!freeOrg.trim()) {
-          setSaving(false);
-          return;
-        }
-        finalOrgName = freeOrg.trim();
-      } else if (selectedOrgDropdown) {
-        finalOrgName = selectedOrgDropdown;
-      } else {
-        setSaving(false);
-        return;
-      }
-    } else {
-      // Free text only
-      if (!freeOrg.trim()) {
-        setSaving(false);
-        return;
-      }
-      finalOrgName = freeOrg.trim();
-    }
-
-    const projectId = project.id;
+    const resumeToken = crypto.randomUUID();
 
     const { data, error } = await supabase
       .from("project_partner_submissions")
       .insert({
         project_id: projectId,
-        country_code: selectedCountry,
-        organisation_name: finalOrgName,
-        submitted: false,
+        country_code: country,
+        organisation_name: organisationName.trim(),
+        resume_token: resumeToken,
+        resume_created_at: new Date().toISOString(),
       })
-      .select()
+      .select("id")
       .single();
 
     setSaving(false);
 
     if (error || !data) {
-      console.error("Error creating submission:", error);
+      console.error(error);
+      setError("Could not create submission. Please try again.");
       return;
     }
 
-    // Save submission reference in browser
-    localStorage.setItem(`partner_submission_${projectId}`, data.id as string);
+    // Persist submission id locally (browser-bound)
+    localStorage.setItem(STORAGE_PREFIX + projectToken, data.id);
 
-    navigate(`/p/${projectToken}/contact`);
+    // Continue with organisation details
+    navigate(`/p/${projectToken}/organisation`);
   }
 
-  // -------------------------------------------------------------
-  // RESET for TESTING ONLY
-  // -------------------------------------------------------------
-  function handleResetForTesting() {
-    if (!project) return;
-
-    const key = `partner_submission_${project.id}`;
-    localStorage.removeItem(key);
-
-    navigate(`/p/${project.id}`, { replace: true });
-  }
-
-  // -------------------------------------------------------------
-  // RENDER
-  // -------------------------------------------------------------
+  /* --------------------------------------------------
+     Render
+  -------------------------------------------------- */
   if (loading) {
     return (
-      <Group justify="center" mt="xl">
-        <Loader size="lg" />
-      </Group>
+      <Box
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Loader />
+      </Box>
     );
   }
 
-  if (!project) {
-    return <Text>Project not found.</Text>;
-  }
-
   return (
-    <Card withBorder radius="md" p="xl" maw={600} mx="auto" mt="xl">
-      <Stack gap="xl">
-        {/* Header */}
-        <Stack gap={0} align="center">
-          <Title order={2}>{project.name}</Title>
-          <Text size="sm" c="dimmed">
-            {project.start_date} → {project.end_date}
-          </Text>
-        </Stack>
+    <Box style={{ minHeight: "100vh" }} bg="#f5f6fa">
+      <Container size="sm" py="xl">
+        <Stack gap="xl">
+          <Stack gap={4}>
+            <Text size="sm" c="dimmed">
+              Step 1 of 7
+            </Text>
+            <Title order={2}>Partner organisation setup</Title>
+            <Text size="sm" c="dimmed">
+              Please select country and enter the full legal name of your organisation.
+            </Text>
+          </Stack>
 
-        {/* COUNTRY */}
-        <Stack>
-          <Text fw={600}>Your country</Text>
           <Select
+            label="Country"
             placeholder="Select your country"
-            data={countries.map((c) => ({
-              value: c.country_code,
-              label: c.country_code,
-            }))}
-            value={selectedCountry}
-            onChange={(v) => {
-              setSelectedCountry(v);
-              setSelectedOrgDropdown(null);
-              setFreeOrg("");
-            }}
+            data={countryOptions}
+            value={country}
+            onChange={setCountry}
+            withAsterisk
+            searchable
+            renderOption={({ option }) => (
+              <Group gap={8}>
+                <img
+                  src={flagUrl(option.value)}
+                  alt={option.value}
+                  width={20}
+                  height={14}
+                  style={{
+                    objectFit: "cover",
+                    borderRadius: 2,
+                    flexShrink: 0,
+                  }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                  }}
+                />
+                <Text>{option.label}</Text>
+              </Group>
+            )}
+            rightSection={
+              country ? (
+                <img
+                  src={flagUrl(country)}
+                  alt={country}
+                  width={20}
+                  height={14}
+                  style={{ borderRadius: 2 }}
+                />
+              ) : null
+            }
+          />
+
+          <TextInput
+            label="Organisation name"
+            placeholder="Full legal name"
+            value={organisationName}
+            onChange={(e) => setOrganisationName(e.currentTarget.value)}
             withAsterisk
           />
-          <Text size="xs" c="dimmed">
-            Participants you add later must reside in this country.
-          </Text>
+
+          {error && <Alert color="red">{error}</Alert>}
+
+          <Button onClick={handleContinue} loading={saving}>
+            Continue
+          </Button>
         </Stack>
-
-        {/* ORGANISATION */}
-        {selectedCountry && (
-          <Stack>
-            <Text fw={600}>Your organisation</Text>
-
-            {orgsForCountry.length > 0 ? (
-              <>
-                <Select
-                  label="Select partner organisation"
-                  placeholder="Choose"
-                  data={[
-                    ...orgsForCountry.map((o) => ({
-                      value: o.organisation_name,
-                      label: o.organisation_name,
-                    })),
-                    { value: "other", label: "Other (enter manually)" },
-                  ]}
-                  value={selectedOrgDropdown}
-                  onChange={(v) => {
-                    setSelectedOrgDropdown(v);
-                    if (v !== "other") setFreeOrg("");
-                  }}
-                  withAsterisk
-                />
-
-                {selectedOrgDropdown === "other" && (
-                  <TextInput
-                    label="Organisation name"
-                    placeholder="Enter organisation"
-                    value={freeOrg}
-                    onChange={(e) => setFreeOrg(e.currentTarget.value)}
-                    withAsterisk
-                  />
-                )}
-              </>
-            ) : (
-              <TextInput
-                label="Organisation"
-                placeholder="Enter organisation"
-                value={freeOrg}
-                onChange={(e) => setFreeOrg(e.currentTarget.value)}
-                withAsterisk
-              />
-            )}
-          </Stack>
-        )}
-
-        {/* BUTTON */}
-        <Button
-          size="md"
-          onClick={handleContinue}
-          loading={saving}
-          disabled={!selectedCountry}
-        >
-          Continue
-        </Button>
-
-        {/* Testing Reset */}
-        <Text
-          size="xs"
-          c="dimmed"
-          ta="center"
-          style={{ cursor: "pointer", marginTop: "1rem" }}
-          onClick={handleResetForTesting}
-        >
-          Reset this form (testing)
-        </Text>
-      </Stack>
-    </Card>
+      </Container>
+    </Box>
   );
 }

@@ -177,7 +177,6 @@ type Props = {
 
 export function SubmissionsTab({
   project,
-  countries,
   submissions,
   loading,
   getCountryLabel,
@@ -356,7 +355,6 @@ export function SubmissionsTab({
     const badges = getSubmissionBadges(s, partnerOrg, { showDistanceBadge });
 
     const canDownloadPdf = tabKey === "pending" || tabKey === "approved";
-    const canDelete = (tabKey === "rejected" || tabKey === "abandoned") && !s.submitted;
 
     // IMPORTANT: per your rule, submitted=true is never deletable.
     // So in practice:

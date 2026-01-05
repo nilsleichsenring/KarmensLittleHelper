@@ -18,12 +18,6 @@ import { type ProjectPartnerOrg } from "../types";
 
 import { applyDistanceUpdate } from "../../../../lib/travel/applyDistanceUpdate";
 
-
-import {
-  calculateDistanceBand,
-  calculateRatesForBand,
-} from "../../../../lib/travel/rateCalculator";
-
 type Props = {
   partnerOrgs: ProjectPartnerOrg[];
   projectCountryOptions: { value: string; label: string }[];

@@ -16,11 +16,9 @@ import {
   TextInput,
   Textarea,
   Title,
-  Checkbox,
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
-import { countryCodeToEmoji, countryCodeToName } from "../../lib/flags";
-
+import { countryCodeToName, } from "../../lib/flags";
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 

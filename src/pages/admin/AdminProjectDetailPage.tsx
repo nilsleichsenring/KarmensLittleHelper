@@ -254,7 +254,7 @@ export default function AdminProjectDetailPage() {
     submissionId: string,
     payload: {
       reviewed_at: string;
-      claim_status: "approved" | "adjusted";
+      claim_status: "approved" | "adjusted" | "rejected";
     }
   ) {
     setSubmissions((prev) =>

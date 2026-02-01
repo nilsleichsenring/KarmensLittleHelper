@@ -7,7 +7,6 @@ import {
   Loader,
   Stack,
   Text,
-  Tooltip,
 } from "@mantine/core";
 import { supabase } from "../../../lib/supabaseClient";
 

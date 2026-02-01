@@ -5,7 +5,6 @@ import {
   Box,
   Button,
   Container,
-  FileInput,
   Group,
   Loader,
   Modal,

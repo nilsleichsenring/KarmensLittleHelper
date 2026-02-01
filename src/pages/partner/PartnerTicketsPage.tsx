@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Alert,
   Badge,
@@ -21,6 +21,9 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 
+import { getTravelModeLabel } from "../../lib/travel/travelIcons";
+import { HelpTooltip } from "../../components/HelpTooltip";
+import { openTicketFile } from "../../lib/tickets/openTicketFile";
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 
@@ -58,7 +61,7 @@ type TicketWithParticipants = Ticket & {
 };
 
 const MODE_OPTIONS = [
-  { value: "bus", label: "Bus" },
+  { value: "bus", label: "Bus / Van" },
   { value: "carpooling", label: "Carpooling" },
   { value: "car", label: "Car / Motorbike" },
   { value: "flight", label: "Plane" }, // 🔥 exakt das erwartet travel.ts
@@ -115,7 +118,7 @@ export default function PartnerTicketsPage() {
   // NEW: Trip type
   const [tripType, setTripType] = useState<TripType>("oneway");
 
-  const [currency, setCurrency] = useState<string | null>("EUR");
+  const [currency, setCurrency] = useState<string>("EUR");
   const [amountOriginal, setAmountOriginal] = useState("");
   const [amountEur, setAmountEur] = useState("");
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<
@@ -123,6 +126,10 @@ export default function PartnerTicketsPage() {
   >([]);
   const [file, setFile] = useState<File | null>(null);
   const [existingFileUrl, setExistingFileUrl] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [isReplacingFile, setIsReplacingFile] = useState(false);
 
   const [saving, setSaving] = useState(false);
 
@@ -196,7 +203,7 @@ export default function PartnerTicketsPage() {
         from_location: t.from_location,
         to_location: t.to_location,
         travel_mode: t.travel_mode,
-        currency: t.currency,
+        currency: t.currency_code ?? "EUR",
         amount_eur: t.amount_eur,
         amount_original: t.amount_original,
         file_url: t.file_url,
@@ -261,6 +268,7 @@ export default function PartnerTicketsPage() {
     setSelectedParticipantIds([]);
     setFile(null);
     setExistingFileUrl(null);
+    setIsReplacingFile(false);
     setErrorMessage(null);
     setEditingTicket(null);
   }
@@ -276,14 +284,31 @@ export default function PartnerTicketsPage() {
     setToLocation(ticket.to_location);
     setMode(ticket.travel_mode);
     setTripType(ticket.trip_type ?? "oneway");
-    setCurrency(ticket.currency);
-    setAmountOriginal(ticket.amount_original?.toString() ?? "");
-    setAmountEur(ticket.amount_eur.toString());
+    setCurrency(ticket.currency || "EUR");
+    if (ticket.currency === "EUR") {
+      setAmountOriginal("");
+    } else {
+      setAmountOriginal(
+        ticket.amount_original !== null
+          ? ticket.amount_original.toString()
+          : ""
+      );
+    }
+    setAmountEur(
+      ticket.amount_eur !== null
+        ? ticket.amount_eur.toString()
+        : ""
+    );
     setSelectedParticipantIds(ticket.participantIds);
     setFile(null);
     setExistingFileUrl(ticket.file_url);
+    setIsReplacingFile(false);
     setErrorMessage(null);
     setModalOpen(true);
+  }
+
+  function handleChangePdfClick() {
+    fileInputRef.current?.click();
   }
 
   // --------------------------------------------------
@@ -331,11 +356,14 @@ export default function PartnerTicketsPage() {
     }
 
     // File handling
+
+    // ADD: immer PDF nötig
     if (!editingTicket && !file)
       return setErrorMessage("Please upload the ticket as PDF.");
 
-    if (editingTicket && !existingFileUrl && !file)
-      return setErrorMessage("Please upload the ticket as PDF.");
+    // EDIT: nur wenn User ersetzen will
+    if (editingTicket && isReplacingFile && !file)
+      return setErrorMessage("Please upload the new PDF.");
 
     setSaving(true);
 
@@ -397,7 +425,7 @@ export default function PartnerTicketsPage() {
           from_location: newTicketRow.from_location,
           to_location: newTicketRow.to_location,
           travel_mode: newTicketRow.travel_mode,
-          currency: newTicketRow.currency,
+          currency: newTicketRow.currency_code ?? currency ?? "EUR",
           amount_original: newTicketRow.amount_original,
           amount_eur: newTicketRow.amount_eur,
           file_url: newTicketRow.file_url,
@@ -436,7 +464,7 @@ export default function PartnerTicketsPage() {
           from_location: fromLocation.trim(),
           to_location: toLocation.trim(),
           travel_mode: mode,
-          currency,
+          currency_code: currency, // ✅ RICHTIGES DB-Feld
           amount_original: originalNumber,
           amount_eur: eurNumber,
           file_url: fileUrlToUse,
@@ -552,7 +580,7 @@ export default function PartnerTicketsPage() {
                 <Table.Th>Route</Table.Th>
                 <Table.Th>Type</Table.Th>
                 <Table.Th>Mode</Table.Th>
-                <Table.Th>EUR</Table.Th>
+                <Table.Th>Amount</Table.Th>
                 <Table.Th>Participants</Table.Th>
                 <Table.Th style={{ width: 160 }}></Table.Th>
               </Table.Tr>
@@ -564,8 +592,20 @@ export default function PartnerTicketsPage() {
                     {t.from_location} → {t.to_location}
                   </Table.Td>
                   <Table.Td>{formatTripType(t.trip_type)}</Table.Td>
-                  <Table.Td>{t.travel_mode}</Table.Td>
-                  <Table.Td>{t.amount_eur.toFixed(2)}</Table.Td>
+                  <Table.Td>{getTravelModeLabel(t.travel_mode)}</Table.Td>
+                  <Table.Td>
+                    <Stack gap={0}>
+                      <Text size="sm">
+                        {t.amount_eur.toFixed(2)} EUR
+                      </Text>
+
+                      {t.currency !== "EUR" && t.amount_original !== null && (
+                        <Text size="xs" c="dimmed">
+                          ({t.amount_original.toFixed(2)} {t.currency})
+                        </Text>
+                      )}
+                    </Stack>
+                  </Table.Td>
                   <Table.Td>
                     <Group gap={4}>
                       {t.participantIds.map((pid) => (
@@ -646,7 +686,14 @@ export default function PartnerTicketsPage() {
             </Group>
 
             <Select
-              label="Means of travel"
+              label={
+                <Group gap={6} align="center">
+                  <span>Means of travel</span>
+                  <HelpTooltip
+                    label="I love u, babes! ❤️"
+                  />
+                </Group>
+              }
               placeholder="Select mode"
               data={MODE_OPTIONS}
               value={mode}
@@ -655,7 +702,6 @@ export default function PartnerTicketsPage() {
               }}
               withAsterisk
             />
-
 
             {/* NEW: Trip type */}
             <Radio.Group
@@ -674,19 +720,31 @@ export default function PartnerTicketsPage() {
 
           {/* Currency & amounts */}
           <Stack gap="xs">
-            <Title order={5}>Amounts</Title>
+            <Group gap={6} align="center">
+              <Title order={5}>Amounts</Title>
+            </Group>
 
             <Group grow align="flex-end">
               <Select
-                label="Currency"
+                label={
+                  <Group gap={6} align="center">
+                    <span>Currency</span>
+                    <HelpTooltip
+                      label="💡If the ticket is in EUR, only the amount in EUR is required. If you choose another currency, please provide both the original amount and the converted amount in EUR."
+                      width={300}
+                    />
+                  </Group>
+                }
                 data={CURRENCY_OPTIONS}
                 value={currency}
-                onChange={(val) => {
-                  setCurrency(val);
-                  if (val === "EUR") {
-                    setAmountOriginal("");
-                  }
-                }}
+                  onChange={(val) => {
+                    const safeCurrency = val ?? "EUR";
+                    setCurrency(safeCurrency);
+
+                    if (safeCurrency === "EUR") {
+                      setAmountOriginal("");
+                    }
+                  }}
                 withAsterisk
               />
 
@@ -701,53 +759,109 @@ export default function PartnerTicketsPage() {
               )}
 
               <TextInput
-                label="Amount in EUR"
+                label={
+                  <Group gap={6} align="center">
+                    <span>Amount in EUR</span>
+                    <HelpTooltip
+                      label="Enter the TOTAL ticket amount for all selected participants. Do not enter per-person prices."
+                    />
+                  </Group>
+                }
                 placeholder="0.00"
                 value={amountEur}
                 onChange={(e) => setAmountEur(e.currentTarget.value)}
                 withAsterisk
               />
             </Group>
-
-            <Text size="xs" c="dimmed">
-              If the ticket is in EUR, only the amount in EUR is required. If you
-              choose another currency, please provide both the original amount and
-              the converted amount in EUR.
-            </Text>
           </Stack>
 
-          {/* File upload */}
+          {/* Ticket file */}
           <Stack gap="xs">
             <Title order={5}>Ticket file</Title>
 
-            <FileInput
-              label={editingTicket ? "Replace PDF (optional)" : "Upload PDF"}
-              placeholder="Upload ticket as PDF"
+            {/* 🔒 Hidden file input – ALWAYS mounted */}
+            <input
+              ref={fileInputRef}
+              type="file"
               accept="application/pdf"
-              value={file}
-              onChange={setFile}
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const selectedFile = e.target.files?.[0] ?? null;
+
+                if (!selectedFile) {
+                  // User closed dialog → back to view state
+                  setIsReplacingFile(false);
+                  return;
+                }
+
+                setFile(selectedFile);
+              }}
             />
 
-            {editingTicket && existingFileUrl && (
+            {/* Zustand A: PDF vorhanden, kein Ersetzen */}
+            {existingFileUrl && !isReplacingFile && !file && (
+              <Group justify="space-between" align="center">
+                <Text size="xs" c="dimmed">
+                  PDF already uploaded.
+                </Text>
+
+                <Group gap="xs">
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={() => openTicketFile(existingFileUrl)}
+                  >
+                    View PDF
+                  </Button>
+
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    onClick={handleChangePdfClick}
+                  >
+                    Change PDF
+                  </Button>
+                </Group>
+              </Group>
+            )}
+
+            {/* Zustand B: User ersetzt PDF */}
+            {isReplacingFile && file && (
               <Text size="xs" c="dimmed">
-                A file is already uploaded. You may keep it or replace it.
+                Selected file: {file.name}
               </Text>
+            )}
+
+            {/* Zustand C: Kein PDF vorhanden */}
+            {!existingFileUrl && !file && !isReplacingFile && (
+              <Button
+                size="xs"
+                onClick={handleChangePdfClick}
+              >
+                Upload PDF
+              </Button>
             )}
           </Stack>
 
           {/* Participants */}
           <Stack gap="xs">
             <Title order={5}>Assign participants</Title>
+
             <MultiSelect
               data={participantOptions}
               value={selectedParticipantIds}
               onChange={setSelectedParticipantIds}
-              label="Participants"
+              label={
+                <Group gap={6} align="center">
+                  <span>Participants</span>
+                  <HelpTooltip
+                    label="Select all participants that are covered by this ticket. The entered ticket amount applies to all selected participants together."
+                    width={300}
+                  />
+                </Group>
+              }
               withAsterisk
             />
-            <Text size="xs" c="dimmed">
-              Select all participants that are covered by this ticket.
-            </Text>
           </Stack>
 
           {errorMessage && <Alert color="red">{errorMessage}</Alert>}

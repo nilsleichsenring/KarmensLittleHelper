@@ -7,6 +7,8 @@ import OrganisationSelectPage from "./pages/admin/OrganisationSelectPage";
 import AdminProjectsPage from "./pages/admin/AdminProjectsPage";
 import AdminProjectDetailPage from "./pages/admin/AdminProjectDetailPage";
 import { AdminProjectCountriesPage } from "./pages/admin/AdminProjectCountriesPage";
+import { AdminLayout } from "./pages/admin/AdminLayout";
+
 
 /* Partner layout */
 import PartnerLayout from "./pages/partner/PartnerLayout";
@@ -25,17 +27,20 @@ import PartnerDonePage from "./pages/partner/PartnerDonePage";
 export function AppRoutes() {
   return (
     <Routes>
-      {/* Admin */}
+      /* Admin */
       <Route path="/" element={<OrganisationSelectPage />} />
-      <Route path="/admin/projects" element={<AdminProjectsPage />} />
-      <Route
-        path="/admin/projects/:projectId"
-        element={<AdminProjectDetailPage />}
-      />
-      <Route
-        path="/admin/projects/:projectId/countries"
-        element={<AdminProjectCountriesPage />}
-      />
+
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route path="projects" element={<AdminProjectsPage />} />
+        <Route
+          path="projects/:projectId"
+          element={<AdminProjectDetailPage />}
+        />
+        <Route
+          path="projects/:projectId/countries"
+          element={<AdminProjectCountriesPage />}
+        />
+      </Route>
 
       {/* Partner – Einstieg */}
       <Route

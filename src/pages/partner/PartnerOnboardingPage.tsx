@@ -1,6 +1,11 @@
 // src/pages/partner/PartnerOnboardingPage.tsx
 
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect } from "react";
+import {
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   Box,
   Button,
@@ -11,16 +16,168 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { supabase } from "../../lib/supabaseClient";
+
+/* --------------------------------------------------
+   Step derivation helper
+-------------------------------------------------- */
+function deriveStepIndex(submission: {
+  organisation_name: string | null;
+  country_code: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  iban: string | null;
+  account_holder: string | null;
+  participants_count: number;
+  tickets_count: number;
+  submitted: boolean;
+}) {
+  let step = 0; // Setup
+
+  if (submission.organisation_name && submission.country_code) {
+    step = 1; // Organisation
+  }
+
+  if (submission.contact_name && submission.contact_email) {
+    step = 2; // Contact
+  }
+
+  if (submission.iban && submission.account_holder) {
+    step = 3; // Bank
+  }
+
+  if (submission.participants_count > 0) {
+    step = 4; // Participants
+  }
+
+  if (submission.tickets_count > 0) {
+    step = 5; // Tickets
+  }
+
+  if (submission.submitted) {
+    step = 6; // Review & Submit
+  }
+
+  return step;
+}
+
+const STEP_PATHS = [
+  "setup",
+  "organisation",
+  "contact",
+  "bank",
+  "participants",
+  "tickets",
+  "submit",
+];
 
 export default function PartnerOnboardingPage() {
   const { projectToken } = useParams<{ projectToken: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  function handleStart() {
+  const resumeToken = searchParams.get("resume");
+
+  /* --------------------------------------------------
+     RESUME ENTRY POINT (DB-driven)
+  -------------------------------------------------- */
+  useEffect(() => {
+    if (!resumeToken || !projectToken) return;
+
+    async function resumeSubmission() {
+      const { data, error } = await supabase
+        .from("project_partner_submissions")
+        .select(
+          `
+          id,
+          organisation_name,
+          country_code,
+          contact_name,
+          contact_email,
+          iban,
+          account_holder,
+          submitted,
+          participants:participants(count),
+          tickets:tickets(count)
+        `
+        )
+        .eq("resume_token", resumeToken)
+        .eq("project_id", projectToken)
+        .single();
+
+      if (error || !data) {
+        console.error("Resume failed:", error);
+        return;
+      }
+
+      const submission = {
+        ...data,
+        participants_count: data.participants?.[0]?.count ?? 0,
+        tickets_count: data.tickets?.[0]?.count ?? 0,
+      };
+
+      const stepIndex = deriveStepIndex(submission);
+
+      // Restore submission context
+      localStorage.setItem(
+        `partner_submission_${projectToken}`,
+        data.id
+      );
+
+      // Restore navigator progress
+      localStorage.setItem(
+        `partner_max_step_${projectToken}`,
+        String(stepIndex)
+      );
+
+      navigate(
+        `/p/${projectToken}/${STEP_PATHS[stepIndex]}`,
+        { replace: true }
+      );
+    }
+
+    resumeSubmission();
+  }, [resumeToken, projectToken, navigate]);
+
+  /* --------------------------------------------------
+     START NEW SUBMISSION
+  -------------------------------------------------- */
+  async function handleStart() {
     if (!projectToken) return;
+
+    // New invite = new flow
+    localStorage.removeItem(`partner_submission_${projectToken}`);
+    localStorage.removeItem(`partner_max_step_${projectToken}`);
+
+    const resumeToken = crypto.randomUUID();
+
+    const { data, error } = await supabase
+      .from("project_partner_submissions")
+      .insert({
+        project_id: projectToken, // projectToken === project.id
+        resume_token: resumeToken,
+        resume_created_at: new Date().toISOString(),
+        claim_status: "open",
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      console.error(error);
+      return;
+    }
+
+    localStorage.setItem(
+      `partner_submission_${projectToken}`,
+      data.id
+    );
+
     navigate(`/p/${projectToken}/setup`);
   }
 
+  /* --------------------------------------------------
+     RENDER
+  -------------------------------------------------- */
   return (
     <Box bg="#f5f6fa" style={{ minHeight: "100vh" }}>
       <Container size="sm" py="xl">
@@ -50,9 +207,13 @@ export default function PartnerOnboardingPage() {
 
               <SimpleGrid cols={2} spacing="xs">
                 <Text size="sm">• Organisation details</Text>
-                <Text size="sm">• Bank details (for reimbursement transfer)</Text>
+                <Text size="sm">
+                  • Bank details (for reimbursement transfer)
+                </Text>
                 <Text size="sm">• Names of all participants</Text>
-                <Text size="sm">• Travel tickets (one PDF per ticket)</Text>
+                <Text size="sm">
+                  • Travel tickets (one PDF per ticket)
+                </Text>
               </SimpleGrid>
 
               <Text size="xs" c="dimmed">

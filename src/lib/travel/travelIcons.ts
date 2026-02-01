@@ -36,3 +36,24 @@ export function getTravelModeIcon(
       return "—";
   }
 }
+
+export function getTravelModeLabel(mode: TravelMode | string | null): string {
+  switch (mode) {
+    case "flight":
+      return "FLIGHT";
+    case "train":
+      return "TRAIN";
+    case "bus":
+      return "BUS / VAN";
+    case "car":
+      return "CAR";
+    case "carpooling":
+      return "CARPOOLING";
+    case "ship":
+      return "SHIP";
+    case "other":
+      return "OTHER";
+    default:
+      return "—";
+  }
+}

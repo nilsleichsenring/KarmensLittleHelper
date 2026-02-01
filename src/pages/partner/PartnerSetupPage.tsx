@@ -16,8 +16,6 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import { countryCodeToName } from "../../lib/flags";
 
-const STORAGE_PREFIX = "partner_submission_";
-
 /** Flag image helper (FILES ARE UPPERCASE: /flags/DE.svg) */
 function flagUrl(code: string | null) {
   if (!code) return undefined;
@@ -27,8 +25,6 @@ function flagUrl(code: string | null) {
 export default function PartnerSetupPage() {
   const { projectToken } = useParams<{ projectToken: string }>();
   const navigate = useNavigate();
-
-  const [projectId, setProjectId] = useState<string | null>(null);
 
   const [countryOptions, setCountryOptions] = useState<
     { value: string; label: string }[]
@@ -43,6 +39,7 @@ export default function PartnerSetupPage() {
 
   /* --------------------------------------------------
      Load project + allowed countries
+     (submission already exists at this point)
   -------------------------------------------------- */
   useEffect(() => {
     async function load() {
@@ -52,7 +49,7 @@ export default function PartnerSetupPage() {
         return;
       }
 
-      // 1) Load project (invite link currently uses project.id)
+      // Load project (invite link uses project.id)
       const { data: project, error: pErr } = await supabase
         .from("projects")
         .select("id")
@@ -65,9 +62,7 @@ export default function PartnerSetupPage() {
         return;
       }
 
-      setProjectId(project.id);
-
-      // 2) Load allowed countries for this project
+      // Load allowed countries
       const { data: countries, error: cErr } = await supabase
         .from("project_countries")
         .select("country_code")
@@ -95,10 +90,10 @@ export default function PartnerSetupPage() {
   }, [projectToken]);
 
   /* --------------------------------------------------
-     Create submission (Mini-Setup)
+     Step 1 – Update existing submission
   -------------------------------------------------- */
   async function handleContinue() {
-    if (!projectId) return;
+    if (!projectToken) return;
 
     setError(null);
 
@@ -112,34 +107,33 @@ export default function PartnerSetupPage() {
       return;
     }
 
-    setSaving(true);
+    const submissionId = localStorage.getItem(
+      `partner_submission_${projectToken}`
+    );
 
-    const resumeToken = crypto.randomUUID();
-
-    const { data, error } = await supabase
-      .from("project_partner_submissions")
-      .insert({
-        project_id: projectId,
-        country_code: country,
-        organisation_name: organisationName.trim(),
-        resume_token: resumeToken,
-        resume_created_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    setSaving(false);
-
-    if (error || !data) {
-      console.error(error);
-      setError("Could not create submission. Please try again.");
+    if (!submissionId) {
+      setError("Submission not found. Please restart the process.");
       return;
     }
 
-    // Persist submission id locally (browser-bound)
-    localStorage.setItem(STORAGE_PREFIX + projectToken, data.id);
+    setSaving(true);
 
-    // Continue with organisation details
+    const { error } = await supabase
+      .from("project_partner_submissions")
+      .update({
+        country_code: country,
+        organisation_name: organisationName.trim(),
+      })
+      .eq("id", submissionId);
+
+    setSaving(false);
+
+    if (error) {
+      console.error(error);
+      setError("Could not save data. Please try again.");
+      return;
+    }
+
     navigate(`/p/${projectToken}/organisation`);
   }
 

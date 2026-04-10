@@ -1,341 +1,325 @@
-// src/pages/admin/project/tabs/PartnersTab.tsx
-
 import { useState } from "react";
 import {
-  Button,
+  Box,
   Card,
   Group,
   Stack,
-  Table,
   Text,
-  TextInput,
   Title,
-  Select,
+  Divider,
+  UnstyledButton,
 } from "@mantine/core";
+import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 
 import CountryFlag from "../../../../components/CountryFlag";
 import { type ProjectPartnerOrg } from "../types";
 
-import { applyDistanceUpdate } from "../../../../lib/travel/applyDistanceUpdate";
+type BankInfo = {
+  account_holder: string | null;
+  iban: string | null;
+  bic: string | null;
+  bank_name: string | null;
+  bank_country: string | null;
+};
+
+type Stats = {
+  participantCount: number;
+  ticketCount: number;
+};
 
 type Props = {
   partnerOrgs: ProjectPartnerOrg[];
-  projectCountryOptions: { value: string; label: string }[];
-
-  updatePartnerOrg: (
-    id: string,
-    patch: Partial<ProjectPartnerOrg>
-  ) => Promise<void>;
-
-  deletePartnerOrg: (id: string) => Promise<void>;
+  bankInfoByOrgName: Record<string, BankInfo>;
+  statsByOrgName: Record<string, Stats>;
 };
 
 export function PartnersTab({
   partnerOrgs,
-  projectCountryOptions,
-  updatePartnerOrg,
-  deletePartnerOrg,
+  bankInfoByOrgName,
+  statsByOrgName,
 }: Props) {
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const active = partnerOrgs.find((p) => p.id === activeId) || null;
+  const [openId, setOpenId] = useState<string | null>(null);
 
-  const [form, setForm] = useState<Partial<ProjectPartnerOrg>>({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  /* ---------------------------------------------------------
-     Select organisation
-  --------------------------------------------------------- */
-  function selectOrg(id: string) {
-    setActiveId(id);
-    setError(null);
-
-    const org = partnerOrgs.find((p) => p.id === id);
-    if (!org) return;
-
-    setForm({
-      organisation_name: org.organisation_name,
-      country_code: org.country_code,
-
-      address_line1: org.address_line1,
-      address_line2: org.address_line2,
-      address_postal_code: org.address_postal_code,
-      address_city: org.address_city,
-      address_region: org.address_region,
-
-      distance_km: org.distance_km,
-      distance_band: org.distance_band,
-      rate_standard_eur: org.rate_standard_eur,
-      rate_green_eur: org.rate_green_eur,
-
-      account_holder: org.account_holder,
-      iban: org.iban,
-      bic: org.bic,
-    });
+  function toggle(id: string) {
+    setOpenId((prev) => (prev === id ? null : id));
   }
 
-  /* ---------------------------------------------------------
-     Field update helper (distance logic centralized)
-  --------------------------------------------------------- */
-  function updateField<K extends keyof ProjectPartnerOrg>(
-    key: K,
-    value: ProjectPartnerOrg[K] | null
-  ) {
-    const updated: Partial<ProjectPartnerOrg> = {
-      ...form,
-      [key]: value as any,
-    };
-
-    if (key === "distance_km") {
-      Object.assign(
-        updated,
-        applyDistanceUpdate(
-          value === null || value === undefined ? null : Number(value)
-        )
-      );
-    }
-
-    setForm(updated);
-  }
-
-  /* ---------------------------------------------------------
-     Save
-  --------------------------------------------------------- */
-  async function saveChanges() {
-    if (!activeId) return;
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      await updatePartnerOrg(activeId, form);
-
-      // UX: zurück zur Liste
-      setActiveId(null);
-      setForm({});
-    } catch (err) {
-      console.error(err);
-      setError("Could not save changes. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  /* ---------------------------------------------------------
-     Render
-  --------------------------------------------------------- */
   return (
     <Stack gap="lg">
       {/* Header */}
       <Stack gap="xs">
         <Title order={2}>Partner organisations</Title>
         <Text size="sm" c="dimmed">
-          This is the master data of partner organisations. Distances and rates
-          entered here affect all submitted claims.
+          This tab provides a read-only overview of partner organisations,
+          distances, rates and bank information.
         </Text>
       </Stack>
 
       {/* List */}
-      <Card withBorder p="md">
-        {partnerOrgs.length === 0 ? (
-          <Text c="dimmed">No partner organisations yet.</Text>
-        ) : (
-          <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Country</Table.Th>
-                <Table.Th>Distance</Table.Th>
-                <Table.Th>Rates</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
+      <Stack gap="sm">
+        {partnerOrgs.map((org) => {
+          const isOpen = openId === org.id;
 
-            <Table.Tbody>
-              {partnerOrgs.map((p) => (
-                <Table.Tr
-                  key={p.id}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => selectOrg(p.id)}
+          const bankInfo =
+            org.organisation_name
+              ? bankInfoByOrgName[org.organisation_name] ?? null
+              : null;
+
+          const stats =
+            org.organisation_name
+              ? statsByOrgName[org.organisation_name]
+              : null;
+
+          return (
+            <Card key={org.id} withBorder radius="md" p={0}>
+              {/* ================= HEADER ================= */}
+              <UnstyledButton
+                onClick={() => toggle(org.id)}
+                style={{ width: "100%" }}
+              >
+                <Group
+                  wrap="nowrap"
+                  px="md"
+                  py="sm"
+                  align="center"
+                  justify="space-between"
                 >
-                  <Table.Td>{p.organisation_name}</Table.Td>
+                  {/* LEFT — Identity */}
+                  <Group gap="sm" wrap="nowrap">
+                    {org.country_code && (
+                      <CountryFlag code={org.country_code} size={18} />
+                    )}
+                    <Stack gap={0}>
+                      <Text fw={600}>{org.organisation_name}</Text>
+                      <Text size="xs" c="dimmed">
+                        {org.country_code ?? "—"}
+                      </Text>
+                    </Stack>
+                  </Group>
 
-                  <Table.Td>
-                    <Group gap={8}>
-                      {p.country_code && (
-                        <CountryFlag code={p.country_code} size={18} />
-                      )}
-                      <Text>{p.country_code || "—"}</Text>
-                    </Group>
-                  </Table.Td>
-
-                  <Table.Td>
-                    {p.distance_km != null ? `${p.distance_km} km` : "—"}
-                  </Table.Td>
-
-                  <Table.Td>
-                    {p.rate_standard_eur != null ? (
+                  {/* CENTER — Meta stats */}
+                  <Group gap="lg">
+                    {stats && (
                       <>
-                        <Text size="sm">
-                          Standard: {p.rate_standard_eur} €
+                        <Text size="sm" c="dimmed">
+                          {stats.participantCount} participant
+                          {stats.participantCount === 1 ? "" : "s"}
                         </Text>
-                        <Text size="sm">
-                          Green: {p.rate_green_eur} €
+                        <Text size="sm" c="dimmed">
+                          {stats.ticketCount} ticket
+                          {stats.ticketCount === 1 ? "" : "s"}
                         </Text>
                       </>
-                    ) : (
-                      <Text size="sm">—</Text>
                     )}
-                  </Table.Td>
 
-                  <Table.Td>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deletePartnerOrg(p.id);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
-      </Card>
+                    <Text size="sm" c="dimmed">
+                      {org.distance_km != null
+                        ? `${org.distance_km} km · Band ${org.distance_band ?? "—"}`
+                        : "Distance not set"}
+                    </Text>
+                  </Group>
 
-      {/* Detail editor */}
-      {active && (
-        <Card withBorder radius="md" p="lg">
-          <Stack gap="lg">
-            <Title order={4}>{active.organisation_name}</Title>
+                  {/* RIGHT — Chevron */}
+                  {isOpen ? (
+                    <IconChevronUp size={18} />
+                  ) : (
+                    <IconChevronDown size={18} />
+                  )}
+                </Group>
+              </UnstyledButton>
 
-            <Group grow>
-              <TextInput
-                label="Organisation name"
-                value={form.organisation_name || ""}
-                onChange={(e) =>
-                  updateField("organisation_name", e.currentTarget.value)
-                }
-              />
+              {/* ================= PANEL ================= */}
+              {isOpen && (
+                <Box
+                  bg="gray.0"
+                  px="md"
+                  py="lg"
+                  style={{
+                    borderTop: "1px solid var(--mantine-color-gray-3)",
+                    borderLeft: "3px solid var(--mantine-color-gray-3)",
+                  }}
+                >
+                  <Stack gap="lg">
+                    {/* Organisation */}
+                    <Stack gap="xs">
+                      <Title order={5}>Organisation</Title>
 
-              <Select
-                label="Country"
-                data={projectCountryOptions}
-                value={form.country_code || null}
-                onChange={(v) => updateField("country_code", v || null)}
-              />
-            </Group>
+                      <Group grow>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Organisation name
+                          </Text>
+                          <Text size="sm">{org.organisation_name}</Text>
+                        </Stack>
 
-            {/* Distance */}
-            <Stack gap="xs">
-              <Title order={5}>Distance & rates</Title>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Country
+                          </Text>
+                          <Group gap={6}>
+                            {org.country_code && (
+                              <CountryFlag
+                                code={org.country_code}
+                                size={16}
+                              />
+                            )}
+                            <Text size="sm">
+                              {org.country_code ?? "—"}
+                            </Text>
+                          </Group>
+                        </Stack>
+                      </Group>
 
-              <Group grow>
-                <TextInput
-                  label="Distance to venue (km)"
-                  value={
-                    form.distance_km !== null &&
-                    form.distance_km !== undefined
-                      ? String(form.distance_km)
-                      : ""
-                  }
-                  onChange={(e) =>
-                    updateField(
-                      "distance_km",
-                      e.currentTarget.value === ""
-                        ? null
-                        : Number(e.currentTarget.value)
-                    )
-                  }
-                />
+                      <Stack gap={2}>
+                        <Text size="xs" c="dimmed">
+                          Address
+                        </Text>
+                        <Text size="sm">
+                          {org.address_line1 ?? "—"}
+                          {org.address_line2 && (
+                            <>
+                              <br />
+                              {org.address_line2}
+                            </>
+                          )}
+                          {(org.address_postal_code || org.address_city) && (
+                            <>
+                              <br />
+                              {org.address_postal_code} {org.address_city}
+                            </>
+                          )}
+                        </Text>
+                      </Stack>
+                    </Stack>
 
-                <TextInput
-                  label="Distance band"
-                  value={
-                    form.distance_band != null
-                      ? `Band ${form.distance_band}`
-                      : ""
-                  }
-                  disabled
-                />
-              </Group>
+                    <Divider />
 
-              <Group grow>
-                <TextInput
-                  label="Standard rate (€)"
-                  value={
-                    form.rate_standard_eur != null
-                      ? String(form.rate_standard_eur)
-                      : ""
-                  }
-                  disabled
-                />
-                <TextInput
-                  label="Green rate (€)"
-                  value={
-                    form.rate_green_eur != null
-                      ? String(form.rate_green_eur)
-                      : ""
-                  }
-                  disabled
-                />
-              </Group>
+                    {/* Distance & rates */}
+                    <Stack gap="xs">
+                      <Title order={5}>Distance & rates</Title>
 
-              <Text size="xs" c="dimmed">
-                Rates are calculated automatically based on the distance.
-              </Text>
-            </Stack>
+                      <Group grow>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Distance to venue
+                          </Text>
+                          <Text size="sm">
+                            {org.distance_km != null
+                              ? `${org.distance_km} km`
+                              : "—"}
+                          </Text>
+                        </Stack>
 
-            {/* Bank */}
-            <Stack gap="xs">
-              <Title order={5}>Bank information</Title>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Distance band
+                          </Text>
+                          <Text size="sm">
+                            {org.distance_band != null
+                              ? `Band ${org.distance_band}`
+                              : "—"}
+                          </Text>
+                        </Stack>
 
-              <TextInput
-                label="Account holder"
-                value={form.account_holder || ""}
-                onChange={(e) =>
-                  updateField("account_holder", e.currentTarget.value)
-                }
-              />
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Standard rate (€)
+                          </Text>
+                          <Text size="sm">
+                            {org.rate_standard_eur != null
+                              ? `${org.rate_standard_eur} €`
+                              : "—"}
+                          </Text>
+                        </Stack>
 
-              <Group grow>
-                <TextInput
-                  label="IBAN"
-                  value={form.iban || ""}
-                  onChange={(e) => updateField("iban", e.currentTarget.value)}
-                />
-                <TextInput
-                  label="BIC"
-                  value={form.bic || ""}
-                  onChange={(e) => updateField("bic", e.currentTarget.value)}
-                />
-              </Group>
-            </Stack>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">
+                            Green rate (€)
+                          </Text>
+                          <Text size="sm">
+                            {org.rate_green_eur != null
+                              ? `${org.rate_green_eur} €`
+                              : "—"}
+                          </Text>
+                        </Stack>
+                      </Group>
 
-            {error && (
-              <Text size="sm" c="red">
-                {error}
-              </Text>
-            )}
+                      <Text size="xs" c="dimmed">
+                        Distances and rates are defined during submission review.
+                      </Text>
+                    </Stack>
 
-            <Group justify="flex-end">
-              <Button
-                onClick={saveChanges}
-                loading={saving}
-                disabled={saving}
-              >
-                Save changes
-              </Button>
-            </Group>
-          </Stack>
-        </Card>
-      )}
+                    <Divider />
+
+                    {/* Bank */}
+                    <Stack gap="xs">
+                      <Title order={5}>
+                        Bank information{" "}
+                        <Text span size="xs" c="dimmed">
+                          (from latest submission)
+                        </Text>
+                      </Title>
+
+                      {bankInfo ? (
+                        <Group grow>
+                          <Stack gap={2}>
+                            <Text size="xs" c="dimmed">
+                              Account holder
+                            </Text>
+                            <Text size="sm">
+                              {bankInfo.account_holder ?? "—"}
+                            </Text>
+                          </Stack>
+
+                          <Stack gap={2}>
+                            <Text size="xs" c="dimmed">
+                              IBAN
+                            </Text>
+                            <Text size="sm">
+                              {bankInfo.iban ?? "—"}
+                            </Text>
+                          </Stack>
+
+                          <Stack gap={2}>
+                            <Text size="xs" c="dimmed">
+                              BIC
+                            </Text>
+                            <Text size="sm">
+                              {bankInfo.bic ?? "—"}
+                            </Text>
+                          </Stack>
+
+                          <Stack gap={2}>
+                            <Text size="xs" c="dimmed">
+                              Bank name
+                            </Text>
+                            <Text size="sm">
+                              {bankInfo.bank_name ?? "—"}
+                            </Text>
+                          </Stack>
+
+                          <Stack gap={2}>
+                            <Text size="xs" c="dimmed">
+                              Bank country
+                            </Text>
+                            <Text size="sm">
+                              {bankInfo.bank_country ?? "—"}
+                            </Text>
+                          </Stack>
+                        </Group>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          No bank information available from submissions.
+                        </Text>
+                      )}
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+            </Card>
+          );
+        })}
+      </Stack>
     </Stack>
   );
 }
-

@@ -18,7 +18,7 @@ import {
   Title,
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
-import { countryCodeToName, } from "../../lib/flags";
+import { countryCodeToName } from "../../lib/flags";
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 
@@ -95,7 +95,6 @@ export default function PartnerParticipantsPage() {
       setLoading(true);
       setErrorMessage(null);
 
-      // Load submission (for country + status)
       const { data: sub, error: subError } = await supabase
         .from("project_partner_submissions")
         .select("id, country_code, organisation_name, submitted")
@@ -113,12 +112,10 @@ export default function PartnerParticipantsPage() {
       setSubmission(subTyped);
 
       if (subTyped.submitted) {
-        // Falls schon eingereicht → direkt zum Done-Screen
         navigate(`/p/${projectToken}/done`, { replace: true });
         return;
       }
 
-      // Load participants
       const { data: parts, error: partsError } = await supabase
         .from("participants")
         .select("id, full_name, residence_country, is_green_travel, notes")
@@ -174,7 +171,7 @@ export default function PartnerParticipantsPage() {
       .insert({
         project_partner_submission_id: submissionId,
         full_name: newName.trim(),
-        residence_country: submission.country_code, // auto from submission
+        residence_country: submission.country_code,
         notes: newNotes.trim() || null,
       })
       .select()
@@ -270,17 +267,13 @@ export default function PartnerParticipantsPage() {
   // -------------------------------------------------------------
   function handleContinue() {
     if (!projectToken) return;
-    navigate(`/p/${projectToken}/tickets`);
-  }
 
-  // -------------------------------------------------------------
-  // Reset for testing
-  // -------------------------------------------------------------
-  function handleResetForTesting() {
-    if (!projectToken) return;
-    const key = SUBMISSION_STORAGE_PREFIX + projectToken;
-    localStorage.removeItem(key);
-    navigate(`/p/${projectToken}`, { replace: true });
+    if (participants.length === 0) {
+      setErrorMessage("Please add at least one participant before continuing.");
+      return;
+    }
+
+    navigate(`/p/${projectToken}/tickets`);
   }
 
   // -------------------------------------------------------------
@@ -344,8 +337,8 @@ export default function PartnerParticipantsPage() {
             </Text>
             <Title order={2}>Participants</Title>
             <Text size="sm" c="dimmed">
-              Please add all people whose travel costs are included in this reimbursement 
-              claim.
+              Please add all people whose travel costs are included in this
+              reimbursement claim.
             </Text>
           </Stack>
 
@@ -367,21 +360,24 @@ export default function PartnerParticipantsPage() {
             deletingId={deletingId}
           />
 
-
           {errorMessage && <Alert color="red">{errorMessage}</Alert>}
 
           {/* Continue */}
-          <Group justify="space-between" mt="md">
-            <Text
-              size="xs"
-              c="dimmed"
-              style={{ cursor: "pointer" }}
-              onClick={handleResetForTesting}
-            >
-              Reset this submission (testing)
-            </Text>
+          <Group justify="flex-end" mt="md" align="flex-start">
+            <Stack gap={4} align="flex-end">
+              <Button
+                onClick={handleContinue}
+                disabled={participants.length === 0}
+              >
+                Continue
+              </Button>
 
-            <Button onClick={handleContinue}>Continue</Button>
+              {participants.length === 0 && (
+                <Text size="xs" c="red">
+                  Please add at least one participant.
+                </Text>
+              )}
+            </Stack>
           </Group>
         </Stack>
       </Container>
@@ -399,7 +395,6 @@ export default function PartnerParticipantsPage() {
         centered
       >
         <Stack gap="sm">
-          {/* Full name */}
           <TextInput
             label="Full name"
             placeholder="Jane Doe"
@@ -425,19 +420,15 @@ export default function PartnerParticipantsPage() {
                 }}
               />
 
-              <Text>
-                {countryCodeToName(submission?.country_code ?? null)}
-              </Text>
+              <Text>{countryCodeToName(submission?.country_code ?? null)}</Text>
             </Group>
 
             <Text size="xs" c="dimmed">
-              The partner organisation confirms that all participants are officially
-              resident in this country.
+              The partner organisation confirms that all participants are
+              officially resident in this country.
             </Text>
           </Stack>
 
-
-          {/* Notes */}
           <Textarea
             label="Notes (optional)"
             minRows={2}
@@ -451,24 +442,24 @@ export default function PartnerParticipantsPage() {
         </Stack>
       </Modal>
 
-{/* Edit Modal */}
-<Modal
-  opened={editOpen}
-  onClose={() => {
-    if (!savingEdit) {
-      setEditOpen(false);
-    }
-  }}
-  title="Edit participant"
-  centered
->
-  <Stack gap="sm">
-    <TextInput
-      label="Full name"
-      value={editName}
-      onChange={(e) => setEditName(e.currentTarget.value)}
-      withAsterisk
-    />
+      {/* Edit Modal */}
+      <Modal
+        opened={editOpen}
+        onClose={() => {
+          if (!savingEdit) {
+            setEditOpen(false);
+          }
+        }}
+        title="Edit participant"
+        centered
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Full name"
+            value={editName}
+            onChange={(e) => setEditName(e.currentTarget.value)}
+            withAsterisk
+          />
 
           {/* Country of residence (read-only) */}
           <Stack gap={4}>
@@ -487,14 +478,12 @@ export default function PartnerParticipantsPage() {
                 }}
               />
 
-              <Text>
-                {countryCodeToName(submission?.country_code ?? null)}
-              </Text>
+              <Text>{countryCodeToName(submission?.country_code ?? null)}</Text>
             </Group>
 
             <Text size="xs" c="dimmed">
-              The partner organisation confirms that all participants are officially
-              resident in this country.
+              The partner organisation confirms that all participants are
+              officially resident in this country.
             </Text>
           </Stack>
 
@@ -538,7 +527,6 @@ function CardLikeParticipantsTable({
 
   return (
     <>
-      {/* Info-Hinweis zum Travel-Typ */}
       <Alert color="blue" variant="light" mb="sm">
         Travel type (standard / green) is determined automatically by the system
         based on the submitted tickets. No manual selection is required.
@@ -548,12 +536,7 @@ function CardLikeParticipantsTable({
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Name</Table.Th>
-
-            {/* ⬇️ neue, schmale Residence-Spalte */}
-            <Table.Th style={{ width: 180 }}>
-              Country of residence
-            </Table.Th>
-
+            <Table.Th style={{ width: 180 }}>Country of residence</Table.Th>
             <Table.Th>Notes</Table.Th>
             <Table.Th style={{ width: 140 }}>Actions</Table.Th>
           </Table.Tr>
@@ -562,10 +545,8 @@ function CardLikeParticipantsTable({
         <Table.Tbody>
           {participants.map((p) => (
             <Table.Tr key={p.id}>
-              {/* Name */}
               <Table.Td>{p.full_name}</Table.Td>
 
-              {/* Country of residence (Flag + Name, read-only) */}
               <Table.Td>
                 <Group gap={6} wrap="nowrap">
                   <img
@@ -584,12 +565,8 @@ function CardLikeParticipantsTable({
                 </Group>
               </Table.Td>
 
-              {/* Notes */}
-              <Table.Td>
-                {p.notes || <Text c="dimmed">—</Text>}
-              </Table.Td>
+              <Table.Td>{p.notes || <Text c="dimmed">—</Text>}</Table.Td>
 
-              {/* Actions */}
               <Table.Td>
                 <Group gap={4} justify="flex-end">
                   <Button

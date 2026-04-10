@@ -319,25 +319,35 @@ export default function PartnerTicketsPage() {
     setErrorMessage(null);
 
     // Basic required fields
-    if (!fromLocation.trim()) return setErrorMessage("Please enter From.");
-    if (!toLocation.trim()) return setErrorMessage("Please enter To.");
-    if (!mode) return setErrorMessage("Please select a mode of travel.");
-    if (!currency) return setErrorMessage("Please select a currency.");
-    if (!tripType) return setErrorMessage("Please select a trip type.");
+    if (!fromLocation.trim())
+      return setErrorMessage("Please enter the departure location.");
+
+    if (!toLocation.trim())
+      return setErrorMessage("Please enter the destination.");
+
+    if (!mode)
+      return setErrorMessage("Please select the means of travel.");
+
+    if (!currency)
+      return setErrorMessage("Please select a currency.");
+
+    if (!tripType)
+      return setErrorMessage("Please select a trip type.");
+
     if (selectedParticipantIds.length === 0)
-      return setErrorMessage("Please assign at least one participant.");
+      return setErrorMessage("Please select at least one participant.");
 
     // Amount logic
     let original = amountOriginal.trim();
     let eur = amountEur.trim();
 
     if (currency === "EUR") {
-      if (!eur) return setErrorMessage("Please enter the amount in EUR.");
+      if (!eur) return setErrorMessage("Please enter the total amount in EUR.");
       original = ""; // not used
     } else {
       if (!original || !eur)
         return setErrorMessage(
-          "Please enter both the original amount and the EUR amount."
+          "Please enter both the original amount and the converted amount in EUR."
         );
     }
 
@@ -346,12 +356,12 @@ export default function PartnerTicketsPage() {
       currency === "EUR" ? null : Number(original.replace(",", "."));
 
     if (originalNumber !== null && isNaN(originalNumber)) {
-      return setErrorMessage("Original amount is not a valid number.");
+      return setErrorMessage("Please enter a valid original amount.");
     }
 
     const eurNumber = Number(eur.replace(",", "."));
     if (isNaN(eurNumber)) {
-      return setErrorMessage("EUR amount is not a valid number.");
+      return setErrorMessage("Please enter a valid amount in EUR.");
     }
 
     // File handling
@@ -536,8 +546,6 @@ export default function PartnerTicketsPage() {
   // Continue
   // --------------------------------------------------
   function handleContinue() {
-    if (tickets.length === 0)
-      return setErrorMessage("Please add at least one ticket before continuing.");
     navigate(`/p/${projectToken!}/submit`);
   }
 
@@ -648,9 +656,20 @@ export default function PartnerTicketsPage() {
           <Group justify="space-between" align="flex-start">
             <Button onClick={openAddModal}>+ Add ticket</Button>
 
-            {errorMessage && <Alert color="red">{errorMessage}</Alert>}
+            <Stack gap={4} align="flex-end">
+              <Button
+                onClick={handleContinue}
+                disabled={tickets.length === 0}
+              >
+                Continue
+              </Button>
 
-            <Button onClick={handleContinue}>Continue</Button>
+              {tickets.length === 0 && (
+                <Text size="xs" c="red">
+                  Please add at least one ticket.
+                </Text>
+              )}
+            </Stack>
           </Group>
         </Stack>
       </Container>
@@ -778,7 +797,7 @@ export default function PartnerTicketsPage() {
           <Stack gap="xs">
             <Title order={5}>Ticket file</Title>
 
-            {/* 🔒 Hidden file input – ALWAYS mounted */}
+            {/* Hidden file input – always mounted */}
             <input
               ref={fileInputRef}
               type="file"
@@ -788,7 +807,7 @@ export default function PartnerTicketsPage() {
                 const selectedFile = e.target.files?.[0] ?? null;
 
                 if (!selectedFile) {
-                  // User closed dialog → back to view state
+                  // User closed dialog → back to previous state
                   setIsReplacingFile(false);
                   return;
                 }
@@ -797,7 +816,7 @@ export default function PartnerTicketsPage() {
               }}
             />
 
-            {/* Zustand A: PDF vorhanden, kein Ersetzen */}
+            {/* Zustand A: Existing PDF, no replacement in progress */}
             {existingFileUrl && !isReplacingFile && !file && (
               <Group justify="space-between" align="center">
                 <Text size="xs" c="dimmed">
@@ -816,7 +835,10 @@ export default function PartnerTicketsPage() {
                   <Button
                     size="xs"
                     variant="subtle"
-                    onClick={handleChangePdfClick}
+                    onClick={() => {
+                      setIsReplacingFile(true);
+                      handleChangePdfClick();
+                    }}
                   >
                     Change PDF
                   </Button>
@@ -824,21 +846,50 @@ export default function PartnerTicketsPage() {
               </Group>
             )}
 
-            {/* Zustand B: User ersetzt PDF */}
-            {isReplacingFile && file && (
-              <Text size="xs" c="dimmed">
-                Selected file: {file.name}
-              </Text>
+            {/* Zustand B: Existing PDF is being replaced */}
+            {existingFileUrl && (isReplacingFile || file) && (
+              <Group justify="space-between" align="center">
+                <Text size="xs" c="dimmed">
+                  Selected file: {file ? file.name : "No file selected yet"}
+                </Text>
+
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => {
+                    setFile(null);
+                    setIsReplacingFile(false);
+                  }}
+                >
+                  Keep existing PDF
+                </Button>
+              </Group>
             )}
 
-            {/* Zustand C: Kein PDF vorhanden */}
-            {!existingFileUrl && !file && !isReplacingFile && (
-              <Button
-                size="xs"
-                onClick={handleChangePdfClick}
-              >
+            {/* Zustand C: New ticket, no PDF selected yet */}
+            {!existingFileUrl && !file && (
+              <Button size="xs" onClick={handleChangePdfClick}>
                 Upload PDF
               </Button>
+            )}
+
+            {/* Zustand D: New ticket, PDF selected */}
+            {!existingFileUrl && file && (
+              <Group justify="space-between" align="center">
+                <Text size="xs" c="dimmed">
+                  Selected file: {file.name}
+                </Text>
+
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setFile(null)}
+                >
+                  Remove
+                </Button>
+              </Group>
             )}
           </Stack>
 

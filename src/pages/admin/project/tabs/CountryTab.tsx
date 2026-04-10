@@ -30,13 +30,11 @@ export function CountryTab({
   deleteCountry,
   getCountryLabel,
 }: Props) {
-  // Dropdown options (exclude already selected countries)
-  const availableCountryOptions = allCountries
-    .filter((c) => !countries.some((pc) => pc.country_code === c.code))
-    .map((c) => ({
-      value: c.code,
-      label: `${c.name} (${c.code})`,
-    }));
+  // Dropdown options (do NOT filter here – keeps Select stable after choosing)
+  const availableCountryOptions = allCountries.map((c) => ({
+    value: c.code,
+    label: `${c.name} (${c.code})`,
+  }));
 
   return (
     <Stack gap="lg">

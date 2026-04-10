@@ -1,4 +1,3 @@
-// src/pages/admin/project/hooks/useProjectSubmissions.ts
 import { useEffect, useState } from "react";
 import { supabase } from "../../../../lib/supabaseClient";
 import type { SubmissionSummary } from "../types";
@@ -16,7 +15,9 @@ export function useProjectSubmissions(projectId: string | null) {
 
       setLoading(true);
 
-      // 1️⃣ Submission Basisdaten (inkl. Payment-Felder)
+      /* ---------------------------------------------------------
+         1️⃣ Load submissions (INCLUDING approved_amount_eur)
+      --------------------------------------------------------- */
       const { data: subs, error } = await supabase
         .from("project_partner_submissions")
         .select(`
@@ -28,6 +29,7 @@ export function useProjectSubmissions(projectId: string | null) {
           submitted_at,
           reviewed_at,
           claim_status,
+          approved_amount_eur,
           payment_status,
           payment_paid_at
         `)
@@ -43,6 +45,9 @@ export function useProjectSubmissions(projectId: string | null) {
 
       const result: SubmissionSummary[] = [];
 
+      /* ---------------------------------------------------------
+         2️⃣ Derive participant / ticket stats
+      --------------------------------------------------------- */
       for (const s of subs ?? []) {
         // Participants
         const { count: participantCount } = await supabase
@@ -57,7 +62,10 @@ export function useProjectSubmissions(projectId: string | null) {
           .eq("project_partner_submission_id", s.id);
 
         const totalEur =
-          tickets?.reduce((sum, t) => sum + (t.amount_eur || 0), 0) ?? 0;
+          tickets?.reduce(
+            (sum, t) => sum + (t.amount_eur ?? 0),
+            0
+          ) ?? 0;
 
         result.push({
           id: s.id,
@@ -71,7 +79,9 @@ export function useProjectSubmissions(projectId: string | null) {
           reviewed_at: s.reviewed_at,
           claim_status: s.claim_status,
 
-          // 🆕 Payment
+          /* ✅ FIX 4 – mapping */
+          approved_amount_eur: s.approved_amount_eur ?? null,
+
           payment_status: s.payment_status ?? "unpaid",
           payment_paid_at: s.payment_paid_at ?? null,
 
@@ -88,12 +98,15 @@ export function useProjectSubmissions(projectId: string | null) {
     load();
   }, [projectId]);
 
-  // 🔁 Lokales Patchen nach Review (Claim-Entscheidung)
+  /* ---------------------------------------------------------
+     🔁 Local patch after review
+  --------------------------------------------------------- */
   function updateSubmissionReview(
     submissionId: string,
     payload: {
       reviewed_at: string;
       claim_status: "approved" | "adjusted";
+      approved_amount_eur: number;
     }
   ) {
     setSubmissions((prev) =>
@@ -103,7 +116,9 @@ export function useProjectSubmissions(projectId: string | null) {
     );
   }
 
-  // 🔁 Lokales Patchen nach Payment (Undo-fähig)
+  /* ---------------------------------------------------------
+     🔁 Local patch after payment
+  --------------------------------------------------------- */
   function updateSubmissionPayment(
     submissionId: string,
     payload: {

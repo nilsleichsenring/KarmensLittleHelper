@@ -1,5 +1,3 @@
-// src/pages/admin/AdminProjectDetailPage.tsx
-
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
@@ -27,54 +25,88 @@ import type {
   ProjectPartnerOrg,
   CountryRef,
   SubmissionSummary,
-  Participant,
-  Ticket,
 } from "./project/types";
+
+/* ---------------------------------------------
+   Types
+--------------------------------------------- */
+
+type BankInfo = {
+  account_holder: string | null;
+  iban: string | null;
+  bic: string | null;
+  bank_name: string | null;
+  bank_country: string | null;
+};
+
+type OrgStats = {
+  participantCount: number;
+  ticketCount: number;
+};
+
+/* ---------------------------------------------
+   Component
+--------------------------------------------- */
 
 export default function AdminProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
 
-  // ---------------------------------------------------
-  // Submissions
-  // ---------------------------------------------------
-  const {
-    submissions: fetchedSubmissions,
-    loading: loadingSubmissions,
-  } = useProjectSubmissions(projectId ?? "");
+  /* -------------------------------------------
+     Submissions
+  ------------------------------------------- */
+  const { submissions: fetchedSubmissions, loading: loadingSubmissions } =
+    useProjectSubmissions(projectId ?? "");
 
-  const [submissions, setSubmissions] =
-    useState<SubmissionSummary[]>([]);
+  const [submissions, setSubmissions] = useState<SubmissionSummary[]>([]);
+  const [submissionsRefreshKey, setSubmissionsRefreshKey] = useState(0);
+  const [preferredSubmissionTab, setPreferredSubmissionTab] = useState<
+    "pending" | "approved" | "paid" | "rejected" | "abandoned" | null
+  >(null);
+
+  function refreshSubmissionsTab() {
+    setSubmissionsRefreshKey((prev) => prev + 1);
+  }
 
   useEffect(() => {
     setSubmissions(fetchedSubmissions);
   }, [fetchedSubmissions]);
 
-  // ---------------------------------------------------
-  // Project meta
-  // ---------------------------------------------------
+  /* -------------------------------------------
+     Project meta
+  ------------------------------------------- */
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [countries, setCountries] = useState<ProjectCountry[]>([]);
-  const [partnerOrgs, setPartnerOrgs] =
-    useState<ProjectPartnerOrg[]>([]);
-  const [allCountries, setAllCountries] =
-    useState<CountryRef[]>([]);
+  const [partnerOrgs, setPartnerOrgs] = useState<ProjectPartnerOrg[]>([]);
+  const [allCountries, setAllCountries] = useState<CountryRef[]>([]);
 
-  // ---------------------------------------------------
-  // Submission modal state
-  // ---------------------------------------------------
+  const [newCountry, setNewCountry] = useState("");
+
+  /* -------------------------------------------
+     Bank info
+  ------------------------------------------- */
+  const [bankInfoByOrgName, setBankInfoByOrgName] = useState<
+    Record<string, BankInfo>
+  >({});
+
+  /* -------------------------------------------
+     Stats
+  ------------------------------------------- */
+  const [statsByOrgName, setStatsByOrgName] = useState<
+    Record<string, OrgStats>
+  >({});
+
+  /* -------------------------------------------
+     Modal state
+  ------------------------------------------- */
   const [subModalOpen, setSubModalOpen] = useState(false);
   const [activeSubmission, setActiveSubmission] =
     useState<SubmissionSummary | null>(null);
-  const [modalParticipants, setModalParticipants] =
-    useState<Participant[]>([]);
-  const [modalTickets, setModalTickets] =
-    useState<Ticket[]>([]);
 
-  // ---------------------------------------------------
-  // Load project & meta
-  // ---------------------------------------------------
+  /* -------------------------------------------
+     Load project & meta
+  ------------------------------------------- */
   useEffect(() => {
     async function load() {
       if (!projectId) {
@@ -86,7 +118,8 @@ export default function AdminProjectDetailPage() {
 
       const { data: proj } = await supabase
         .from("projects")
-        .select(`
+        .select(
+          `
           id,
           name,
           description,
@@ -101,7 +134,8 @@ export default function AdminProjectDetailPage() {
             name,
             country_code
           )
-        `)
+        `
+        )
         .eq("id", projectId)
         .single();
 
@@ -128,15 +162,65 @@ export default function AdminProjectDetailPage() {
         .order("name", { ascending: true });
       setAllCountries(allC || []);
 
+      const { data: subs } = await supabase
+        .from("project_partner_submissions")
+        .select(
+          `
+          organisation_name,
+          account_holder,
+          iban,
+          bic,
+          bank_name,
+          bank_country
+        `
+        )
+        .eq("project_id", projectId);
+
+      const bankMap: Record<string, BankInfo> = {};
+      const statsMap: Record<string, OrgStats> = {};
+
+      (subs || []).forEach((s: any) => {
+        const orgName = (s.organisation_name ?? "").trim();
+        if (!orgName) return;
+
+        bankMap[orgName] = {
+          account_holder: s.account_holder ?? null,
+          iban: s.iban ?? null,
+          bic: s.bic ?? null,
+          bank_name: s.bank_name ?? null,
+          bank_country: s.bank_country ?? null,
+        };
+
+        if (!statsMap[orgName]) {
+          statsMap[orgName] = {
+            participantCount: 0,
+            ticketCount: 0,
+          };
+        }
+      });
+
+      fetchedSubmissions.forEach((s) => {
+        const org = (s.organisation_name ?? "").trim();
+        if (!org) return;
+
+        statsMap[org] = {
+          participantCount: s.participantCount,
+          ticketCount: s.ticketCount,
+        };
+      });
+
+      setBankInfoByOrgName(bankMap);
+      setStatsByOrgName(statsMap);
+
       setLoading(false);
     }
 
     load();
-  }, [projectId]);
+  }, [projectId, fetchedSubmissions]);
 
-  // ---------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------
+  /* -------------------------------------------
+     Helpers
+  ------------------------------------------- */
   function getCountryLabel(code: string | null) {
     if (!code) return "—";
     const found = allCountries.find((c) => c.code === code);
@@ -150,129 +234,117 @@ export default function AdminProjectDetailPage() {
     return `${start} → ${end}`;
   }
 
-  // ---------------------------------------------------
-  // Partner org updates ✅ FIX
-  // ---------------------------------------------------
-  async function updatePartnerOrg(
-    id: string,
-    patch: Partial<ProjectPartnerOrg>
-  ) {
-    const { error } = await supabase
-      .from("project_partner_orgs")
-      .update(patch)
-      .eq("id", id);
-
-    if (error) {
-      console.error(error);
-      throw new Error("Failed to update partner organisation");
+  function getTabForClaimStatus(
+    claimStatus: SubmissionSummary["claim_status"]
+  ): "pending" | "approved" | "rejected" {
+    if (claimStatus === "approved" || claimStatus === "adjusted") {
+      return "approved";
     }
 
-    // 🔄 sync local state
-    setPartnerOrgs((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
-    );
-  }
-
-  async function deletePartnerOrg(id: string) {
-    const { error } = await supabase
-      .from("project_partner_orgs")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      console.error(error);
-      throw new Error("Failed to delete partner organisation");
+    if (claimStatus === "rejected") {
+      return "rejected";
     }
 
-    setPartnerOrgs((prev) => prev.filter((p) => p.id !== id));
+    return "pending";
   }
 
-  // ---------------------------------------------------
-  // Submission details loader
-  // ---------------------------------------------------
-  async function loadSubmissionDetails(submissionId: string) {
-    const { data: parts } = await supabase
-      .from("participants")
-      .select("id, full_name, is_green_travel")
-      .eq("project_partner_submission_id", submissionId)
-      .order("full_name", { ascending: true });
+  /* -------------------------------------------
+     Country handling
+  ------------------------------------------- */
+  async function addCountry() {
+    if (!projectId || !newCountry) return;
 
-    const { data: tix } = await supabase
-      .from("tickets")
-      .select(`
-        id,
-        from_location,
-        to_location,
-        travel_mode,
-        currency_code,
-        amount_original,
-        amount_eur,
-        trip_type,
-        file_url,
-        approved,
-        ticket_participants (
-          participant: participants ( id, full_name )
-        )
-      `)
-      .eq("project_partner_submission_id", submissionId);
+    if (countries.some((c) => c.country_code === newCountry)) return;
 
-    const tickets: Ticket[] =
-      (tix || []).map((t: any) => ({
-        id: t.id,
-        from_location: t.from_location,
-        to_location: t.to_location,
-        travel_mode: t.travel_mode ?? null,
-        currency: t.currency_code ?? "EUR",
-        amount_original: t.amount_original ?? null,
-        amount_eur: Number(t.amount_eur ?? 0),
-        trip_type: t.trip_type ?? null,
-        file_url: t.file_url ?? null,
-        approved: t.approved ?? true,
-        assigned_participants:
-          t.ticket_participants?.map((tp: any) => tp.participant) ?? [],
-      })) ?? [];
+    const { data } = await supabase
+      .from("project_countries")
+      .insert({
+        project_id: projectId,
+        country_code: newCountry,
+      })
+      .select()
+      .single();
 
-    return {
-      participants: (parts || []) as Participant[],
-      tickets,
-    };
+    if (data) {
+      setCountries((prev) => [...prev, data]);
+      setNewCountry("");
+    }
   }
 
-  async function openSubmissionModal(sub: SubmissionSummary) {
+  async function deleteCountry(id: string) {
+    await supabase.from("project_countries").delete().eq("id", id);
+    setCountries((prev) => prev.filter((c) => c.id !== id));
+  }
+
+  /* -------------------------------------------
+     Modal handling
+  ------------------------------------------- */
+  function openSubmissionModal(sub: SubmissionSummary) {
     setActiveSubmission(sub);
     setSubModalOpen(true);
-
-    const details = await loadSubmissionDetails(sub.id);
-    setModalParticipants(details.participants);
-    setModalTickets(details.tickets);
   }
 
-  // ---------------------------------------------------
-  // Review callback
-  // ---------------------------------------------------
-  function handleReviewComplete(
+  /* -------------------------------------------
+     Parent-level submission mutations
+  ------------------------------------------- */
+  function handleDeleteSubmission(submissionId: string) {
+    setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+
+    if (activeSubmission?.id === submissionId) {
+      setSubModalOpen(false);
+      setActiveSubmission(null);
+    }
+  }
+
+  function handlePaymentUpdated(
     submissionId: string,
     payload: {
-      reviewed_at: string;
-      claim_status: "approved" | "adjusted" | "rejected";
+      payment_status: SubmissionSummary["payment_status"];
+      payment_paid_at: string | null;
     }
   ) {
     setSubmissions((prev) =>
-      prev.map((s) =>
-        s.id === submissionId ? { ...s, ...payload } : s
-      )
-    );
-
-    setActiveSubmission((prev) =>
-      prev && prev.id === submissionId
-        ? { ...prev, ...payload }
-        : prev
+      prev.map((s) => (s.id === submissionId ? { ...s, ...payload } : s))
     );
   }
 
-  // ---------------------------------------------------
-  // Render
-  // ---------------------------------------------------
+  /* -------------------------------------------
+     Review callback
+  ------------------------------------------- */
+  async function handleReviewComplete(
+    submissionId: string,
+    payload: {
+      reviewed_at: string | null;
+      claim_status: SubmissionSummary["claim_status"];
+      approved_amount_eur?: number | null;
+    }
+  ) {
+    const { error } = await supabase
+      .from("project_partner_submissions")
+      .update({
+        reviewed_at: payload.reviewed_at,
+        claim_status: payload.claim_status,
+        approved_amount_eur: payload.approved_amount_eur ?? null,
+      })
+      .eq("id", submissionId);
+
+    if (error) {
+      console.error("Review update failed", error);
+      return;
+    }
+
+    setPreferredSubmissionTab(getTabForClaimStatus(payload.claim_status));
+
+    setSubmissions((prev) =>
+      prev.map((s) => (s.id === submissionId ? { ...s, ...payload } : s))
+    );
+
+    setSubmissionsRefreshKey((prev) => prev + 1);
+  }
+
+  /* -------------------------------------------
+     Render
+  ------------------------------------------- */
   if (loading) {
     return (
       <Group justify="center" mt="xl">
@@ -291,11 +363,6 @@ export default function AdminProjectDetailPage() {
       </Stack>
     );
   }
-
-  const projectCountryOptions = countries.map((c) => ({
-    value: c.country_code,
-    label: getCountryLabel(c.country_code),
-  }));
 
   return (
     <Stack gap="lg">
@@ -319,9 +386,7 @@ export default function AdminProjectDetailPage() {
             project={project}
             projectCountries={countries}
             hostCountryCode={project.organisations?.country_code ?? null}
-            hostOrganisationName={
-              project.organisations?.name ?? "Unknown host"
-            }
+            hostOrganisationName={project.organisations?.name ?? "Unknown host"}
             formatDateRange={formatDateRange}
             onUpdateReference={async () => {}}
           />
@@ -331,10 +396,10 @@ export default function AdminProjectDetailPage() {
           <CountryTab
             countries={countries}
             allCountries={allCountries}
-            newCountry={""}
-            setNewCountry={() => {}}
-            addCountry={async () => {}}
-            deleteCountry={async () => {}}
+            newCountry={newCountry}
+            setNewCountry={setNewCountry}
+            addCountry={addCountry}
+            deleteCountry={deleteCountry}
             getCountryLabel={getCountryLabel}
           />
         </Tabs.Panel>
@@ -342,9 +407,8 @@ export default function AdminProjectDetailPage() {
         <Tabs.Panel value="partners" pt="md">
           <PartnersTab
             partnerOrgs={partnerOrgs}
-            projectCountryOptions={projectCountryOptions}
-            updatePartnerOrg={updatePartnerOrg}
-            deletePartnerOrg={deletePartnerOrg}
+            bankInfoByOrgName={bankInfoByOrgName}
+            statsByOrgName={statsByOrgName}
           />
         </Tabs.Panel>
 
@@ -356,6 +420,12 @@ export default function AdminProjectDetailPage() {
             loading={loadingSubmissions}
             getCountryLabel={getCountryLabel}
             onOpenSubmission={openSubmissionModal}
+            refreshKey={submissionsRefreshKey}
+            preferredTab={preferredSubmissionTab}
+            onPreferredTabApplied={() => setPreferredSubmissionTab(null)}
+            onRequireRefresh={refreshSubmissionsTab}
+            onDeleteSubmission={handleDeleteSubmission}
+            onPaymentUpdated={handlePaymentUpdated}
           />
         </Tabs.Panel>
       </Tabs>
@@ -364,8 +434,6 @@ export default function AdminProjectDetailPage() {
         opened={subModalOpen}
         onClose={() => setSubModalOpen(false)}
         submission={activeSubmission}
-        participants={modalParticipants}
-        tickets={modalTickets}
         getCountryLabel={getCountryLabel}
         project={project}
         countries={countries}

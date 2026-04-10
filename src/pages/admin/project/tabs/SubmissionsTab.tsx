@@ -27,140 +27,39 @@ import type {
 } from "../types";
 
 import CountryFlag from "../../../../components/CountryFlag";
+import { HelpTooltip } from "../../../../components/HelpTooltip";
 
 import { generatePdf } from "../../../../lib/pdf/pdfEngine";
 import { renderAdminSubmission } from "../../../../lib/pdf/renderers/adminSubmission";
+import { classifySubmission } from "../submissionReview/logic/reviewClassification";
+import { getSubmissionBadges } from "../submissionReview/logic/reviewBadges";
+import {
+  markSubmissionPaid,
+  undoSubmissionPayment,
+  deleteSubmissionCascade,
+} from "../submissionReview/logic/reviewPersistence";
 
 /* =========================================================
-   BADGE LOGIC
+   HELPERS (Formatting)
 ========================================================= */
 
-type SubmissionBadge = {
-  key: string;
-  label: string;
-  color: "gray" | "green" | "yellow" | "blue" | "red";
-};
-
-function getSubmissionBadges(
-  submission: SubmissionSummary,
-  partnerOrg: ProjectPartnerOrg | null,
-  opts?: { showDistanceBadge?: boolean }
-): SubmissionBadge[] {
-  const badges: SubmissionBadge[] = [];
-  const showDistanceBadge = opts?.showDistanceBadge ?? true;
-
-  // 1️⃣ Distance missing → highest priority (only if enabled)
-  if (showDistanceBadge && (!partnerOrg || partnerOrg.distance_km == null)) {
-    badges.push({
-      key: "needs-distance",
-      label: "Needs distance entry",
-      color: "red",
-    });
-    return badges;
-  }
-
-  // 2️⃣ Claim status
-  if (submission.claim_status === "approved") {
-    badges.push({
-      key: "approved",
-      label: "Approved as claimed",
-      color: "green",
-    });
-  }
-
-  if (submission.claim_status === "adjusted") {
-    badges.push({
-      key: "adjusted",
-      label: "Adjusted & approved",
-      color: "yellow",
-    });
-  }
-
-  if (submission.claim_status === "open") {
-    badges.push({
-      key: "open",
-      label: "Needs review",
-      color: "gray",
-    });
-  }
-
-  if (submission.claim_status === "rejected") {
-    badges.push({
-      key: "rejected",
-      label: "Rejected",
-      color: "red",
-    });
-  }
-
-  return badges;
+function formatEur(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${Number(value).toFixed(2)} €`;
 }
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-type TabKey = "pending" | "approved" | "rejected" | "abandoned";
+type TabKey =
+  | "pending"
+  | "approved"
+  | "paid"
+  | "rejected"
+  | "abandoned"
+  | "all";
 
-function classifySubmission(
-  submission: SubmissionSummary,
-  partnerOrg: ProjectPartnerOrg | null
-): TabKey {
-  // Abandoned: submitted = false
-  if (!submission.submitted) return "abandoned";
-
-  // Pending: submitted true AND (distance missing OR needs review)
-  const needsDistance = !partnerOrg || partnerOrg.distance_km == null;
-  if (needsDistance) return "pending";
-  if (submission.claim_status === "open") return "pending";
-
-  // Approved
-  if (
-    submission.claim_status === "approved" ||
-    submission.claim_status === "adjusted"
-  ) {
-    return "approved";
-  }
-
-  // Rejected
-  if (submission.claim_status === "rejected") return "rejected";
-
-  // Fallback (should not happen with your allowed statuses)
-  return "pending";
-}
-
-async function hardDeleteSubmission(submissionId: string) {
-  // 1) ticket_participants
-  const { error: tpErr } = await supabase
-    .from("ticket_participants")
-    .delete()
-    .eq("project_partner_submission_id", submissionId);
-
-  // If your schema doesn't have project_partner_submission_id on ticket_participants,
-  // you can swap this to:
-  // - load ticket ids first, then delete .in("ticket_id", ticketIds)
-  if (tpErr) throw tpErr;
-
-  // 2) tickets
-  const { error: ticketsErr } = await supabase
-    .from("tickets")
-    .delete()
-    .eq("project_partner_submission_id", submissionId);
-  if (ticketsErr) throw ticketsErr;
-
-  // 3) participants
-  const { error: participantsErr } = await supabase
-    .from("participants")
-    .delete()
-    .eq("project_partner_submission_id", submissionId);
-  if (participantsErr) throw participantsErr;
-
-  // 4) submission
-  const { error: subErr } = await supabase
-    .from("project_partner_submissions")
-    .delete()
-    .eq("id", submissionId);
-  if (subErr) throw subErr;
-}
 
 /* =========================================================
    COMPONENT
@@ -173,6 +72,18 @@ type Props = {
   loading: boolean;
   getCountryLabel: (code: string | null) => string;
   onOpenSubmission: (submission: SubmissionSummary) => void;
+  refreshKey: number;
+  preferredTab?: Exclude<TabKey, "all"> | null;
+  onPreferredTabApplied?: () => void;
+  onRequireRefresh: () => void;
+  onDeleteSubmission: (submissionId: string) => void;
+  onPaymentUpdated: (
+    submissionId: string,
+    payload: {
+      payment_status: SubmissionSummary["payment_status"];
+      payment_paid_at: string | null;
+    }
+  ) => void;
 };
 
 export function SubmissionsTab({
@@ -181,20 +92,19 @@ export function SubmissionsTab({
   loading,
   getCountryLabel,
   onOpenSubmission,
+  refreshKey,
+  preferredTab,
+  onPreferredTabApplied,
+  onRequireRefresh,
+  onDeleteSubmission,
+  onPaymentUpdated,
 }: Props) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [partnerOrgs, setPartnerOrgs] = useState<ProjectPartnerOrg[]>([]);
   const [loadingOrgs, setLoadingOrgs] = useState(true);
 
-  // Local copy so we can remove deleted items without requiring parent refetch
-  const [localSubmissions, setLocalSubmissions] =
-    useState<SubmissionSummary[]>(submissions);
+  const [activeTab, setActiveTab] = useState<TabKey>("pending");
 
-  useEffect(() => {
-    setLocalSubmissions(submissions);
-  }, [submissions]);
-
-  // Delete modal state
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SubmissionSummary | null>(
     null
@@ -203,7 +113,17 @@ export function SubmissionsTab({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------
-     Load Partner Organisations (SOURCE OF TRUTH)
+     Sync preferred tab from parent
+  --------------------------------------------------------- */
+  useEffect(() => {
+    if (preferredTab) {
+      setActiveTab(preferredTab);
+      onPreferredTabApplied?.();
+    }
+  }, [preferredTab, onPreferredTabApplied]);
+
+  /* ---------------------------------------------------------
+     Load Partner Organisations
   --------------------------------------------------------- */
   useEffect(() => {
     let active = true;
@@ -224,10 +144,11 @@ export function SubmissionsTab({
     }
 
     loadPartnerOrgs();
+
     return () => {
       active = false;
     };
-  }, [project.id]);
+  }, [project.id, refreshKey]);
 
   /* ---------------------------------------------------------
      Helpers
@@ -298,13 +219,11 @@ export function SubmissionsTab({
     setDeleteError(null);
 
     try {
-      await hardDeleteSubmission(deleteTarget.id);
-
-      // Remove locally
-      setLocalSubmissions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
-
+      await deleteSubmissionCascade(deleteTarget.id);
+      onDeleteSubmission(deleteTarget.id);
       setDeleteOpen(false);
       setDeleteTarget(null);
+      setActiveTab("abandoned");
     } catch (err) {
       console.error(err);
       setDeleteError("Could not delete submission. Please try again.");
@@ -317,21 +236,33 @@ export function SubmissionsTab({
      Derived tab lists
   --------------------------------------------------------- */
   const grouped = useMemo(() => {
-    const result: Record<TabKey, SubmissionSummary[]> = {
+    const result: Record<Exclude<TabKey, "all">, SubmissionSummary[]> = {
       pending: [],
       approved: [],
+      paid: [],
       rejected: [],
       abandoned: [],
     };
 
-    for (const s of localSubmissions) {
+    for (const s of submissions) {
       const partnerOrg = getPartnerOrgForSubmission(s);
       const key = classifySubmission(s, partnerOrg);
       result[key].push(s);
     }
 
-    return result;
-  }, [localSubmissions, partnerOrgs]);
+    const allOrdered: SubmissionSummary[] = [
+      ...result.pending,
+      ...result.approved,
+      ...result.paid,
+      ...result.rejected,
+      ...result.abandoned,
+    ];
+
+    return {
+      ...result,
+      all: allOrdered,
+    } as Record<TabKey, SubmissionSummary[]>;
+  }, [submissions, partnerOrgs]);
 
   /* ---------------------------------------------------------
      Loading state
@@ -352,16 +283,45 @@ export function SubmissionsTab({
     const tabKey = classifySubmission(s, partnerOrg);
 
     const showDistanceBadge = tabKey === "pending";
-    const badges = getSubmissionBadges(s, partnerOrg, { showDistanceBadge });
+    const badges = getSubmissionBadges(s, partnerOrg, {
+      showDistanceBadge,
+    });
 
-    const canDownloadPdf = tabKey === "pending" || tabKey === "approved";
-
-    // IMPORTANT: per your rule, submitted=true is never deletable.
-    // So in practice:
-    // - Abandoned (submitted=false) deletable ✅
-    // - Rejected (submitted=true) NOT deletable (yet) ❌
-    // If you later allow rejected deletion even when submitted=true, we’ll change here.
+    const canDownloadPdf = tabKey !== "abandoned";
     const canDeleteByRules = tabKey === "abandoned";
+
+    const canMarkPaidBase =
+      (tabKey === "approved" || tabKey === "paid") &&
+      (s.claim_status === "approved" || s.claim_status === "adjusted") &&
+      s.payment_status !== "paid";
+
+    const canUndoPaid =
+      (tabKey === "approved" || tabKey === "paid") &&
+      s.payment_status === "paid";
+
+    const approvedAmount = s.approved_amount_eur ?? null;
+    const hasApprovedAmount =
+      approvedAmount != null && Number.isFinite(Number(approvedAmount));
+    const isApprovedAmountPositive =
+      hasApprovedAmount && Number(approvedAmount) > 0;
+
+    const canMarkPaid =
+      canMarkPaidBase && hasApprovedAmount && isApprovedAmountPositive;
+
+    const claimed = Number(s.totalEur ?? 0);
+    const diff = hasApprovedAmount ? claimed - Number(approvedAmount) : null;
+
+    const showOverclaimed =
+      diff != null && Number.isFinite(diff) && diff > 0.009;
+
+    const showUnderclaimed =
+      diff != null && Number.isFinite(diff) && diff < -0.009;
+
+    const paymentTooltipLabel = !hasApprovedAmount
+      ? "Cannot mark as paid yet: no approved amount stored. Please complete the decision step first."
+      : !isApprovedAmountPositive
+      ? "Cannot mark as paid: approved amount is 0.00 €. If this is correct, payment is not required."
+      : "Ready for payment based on the stored approved amount.";
 
     return (
       <Card
@@ -374,7 +334,6 @@ export function SubmissionsTab({
         w="100%"
       >
         <Stack gap="md">
-          {/* Header */}
           <Group justify="space-between" align="flex-start">
             <Stack gap={2}>
               <Text fw={600} size="lg">
@@ -395,17 +354,18 @@ export function SubmissionsTab({
                 </Badge>
               ))}
 
-              {/* Payment status (ALL tabs) */}
               {s.payment_status === "paid" ? (
                 <Badge color="green" variant="light">
                   Paid{" "}
                   {s.payment_paid_at
                     ? `(${new Date(s.payment_paid_at).toLocaleDateString()})`
                     : ""}
+                  {hasApprovedAmount ? ` · ${formatEur(approvedAmount)}` : ""}
                 </Badge>
               ) : (
                 <Badge color="gray" variant="light">
                   Not paid
+                  {hasApprovedAmount ? ` · ${formatEur(approvedAmount)}` : ""}
                 </Badge>
               )}
             </Stack>
@@ -413,18 +373,52 @@ export function SubmissionsTab({
 
           <Divider />
 
-          {/* Summary */}
-          <Group gap="md">
+          <Group gap="md" wrap="wrap">
             <Badge variant="outline">{s.participantCount} participants</Badge>
             <Badge variant="outline">{s.ticketCount} tickets</Badge>
-            <Badge variant="outline">EUR total: {s.totalEur.toFixed(2)}</Badge>
+
+            <Badge variant="outline">Claimed: {formatEur(claimed)}</Badge>
+
+            {hasApprovedAmount ? (
+              <Badge color="green" variant="light">
+                Approved: {formatEur(approvedAmount)}
+              </Badge>
+            ) : (
+              <Badge color="gray" variant="light">
+                Approved: —
+              </Badge>
+            )}
+
+            {diff != null && Number.isFinite(diff) && (
+              <Badge
+                color={
+                  showOverclaimed
+                    ? "yellow"
+                    : showUnderclaimed
+                    ? "blue"
+                    : "gray"
+                }
+                variant="light"
+              >
+                Difference: {formatEur(diff)}
+              </Badge>
+            )}
+
+            {showOverclaimed && (
+              <Badge color="yellow" variant="outline">
+                Overclaimed
+              </Badge>
+            )}
           </Group>
 
           <Divider />
 
-          {/* Actions */}
           <Group justify="flex-end" gap="sm">
-            <Button size="xs" variant="light" onClick={() => onOpenSubmission(s)}>
+            <Button
+              size="xs"
+              variant="light"
+              onClick={() => onOpenSubmission(s)}
+            >
               View details
             </Button>
 
@@ -435,70 +429,68 @@ export function SubmissionsTab({
                 loading={downloadingId === s.id}
                 onClick={() => handleDownload(s)}
               >
-                {downloadingId === s.id ? "Generating…" : "Download admin PDF"}
+                {downloadingId === s.id
+                  ? "Generating…"
+                  : "Download admin PDF"}
               </Button>
             )}
 
-            {(tabKey === "pending" || tabKey === "approved") &&
-              (s.claim_status === "approved" || s.claim_status === "adjusted") &&
-              s.payment_status !== "paid" && (
+            {canMarkPaidBase && (
+              <Group gap={6}>
                 <Button
                   size="xs"
                   color="green"
+                  disabled={!canMarkPaid}
                   onClick={async () => {
-                    const now = new Date().toISOString();
+                    if (!hasApprovedAmount || !isApprovedAmountPositive) return;
 
-                    await supabase
-                      .from("project_partner_submissions")
-                      .update({
-                        payment_status: "paid",
-                        payment_paid_at: now,
-                      })
-                      .eq("id", s.id);
+                    let result;
 
-                    // Update locally (immutable)
-                    setLocalSubmissions((prev) =>
-                      prev.map((x) =>
-                        x.id === s.id
-                          ? { ...x, payment_status: "paid", payment_paid_at: now }
-                          : x
-                      )
-                    );
+                    try {
+                      result = await markSubmissionPaid(s.id);
+                    } catch (error) {
+                      console.error(error);
+                      return;
+                    }
+
+                    onPaymentUpdated(s.id, result);
+
+                    onRequireRefresh();
+                    setActiveTab("paid");
                   }}
                 >
                   Mark as instructed & paid
                 </Button>
-              )}
 
-            {(tabKey === "pending" || tabKey === "approved") &&
-              s.payment_status === "paid" && (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={async () => {
-                    await supabase
-                      .from("project_partner_submissions")
-                      .update({
-                        payment_status: "unpaid",
-                        payment_paid_at: null,
-                      })
-                      .eq("id", s.id);
+                <HelpTooltip label={paymentTooltipLabel} />
+              </Group>
+            )}
 
-                    setLocalSubmissions((prev) =>
-                      prev.map((x) =>
-                        x.id === s.id
-                          ? { ...x, payment_status: "unpaid", payment_paid_at: null }
-                          : x
-                      )
-                    );
-                  }}
-                >
-                  Undo payment
-                </Button>
-              )}
+            {canUndoPaid && (
+              <Button
+                size="xs"
+                variant="subtle"
+                color="red"
+                onClick={async () => {
+                  let result;
 
-            {/* Delete (by your current strict rule: only submitted=false) */}
+                  try {
+                    result = await undoSubmissionPayment(s.id);
+                  } catch (error) {
+                    console.error(error);
+                    return;
+                  }
+
+                  onPaymentUpdated(s.id, result);
+
+                  onRequireRefresh();
+                  setActiveTab("approved");
+                }}
+              >
+                Undo payment
+              </Button>
+            )}
+
             {canDeleteByRules && (
               <Button
                 size="xs"
@@ -515,9 +507,6 @@ export function SubmissionsTab({
     );
   }
 
-  /* ---------------------------------------------------------
-     Render tab content
-  --------------------------------------------------------- */
   function RenderTabList({ items }: { items: SubmissionSummary[] }) {
     if (items.length === 0) {
       return (
@@ -536,12 +525,8 @@ export function SubmissionsTab({
     );
   }
 
-  /* ---------------------------------------------------------
-     RENDER
-  --------------------------------------------------------- */
   return (
     <>
-      {/* Delete confirm modal */}
       <Modal
         opened={deleteOpen}
         onClose={() => {
@@ -601,8 +586,12 @@ export function SubmissionsTab({
           </Text>
         </Stack>
 
-        {/* Nested tabs */}
-        <Tabs defaultValue="pending" maw={700} w="100%">
+        <Tabs
+          value={activeTab}
+          onChange={(value) => setActiveTab((value as TabKey) || "pending")}
+          maw={700}
+          w="100%"
+        >
           <Tabs.List>
             <Tabs.Tab value="pending">
               Pending ({grouped.pending.length})
@@ -610,12 +599,14 @@ export function SubmissionsTab({
             <Tabs.Tab value="approved">
               Approved ({grouped.approved.length})
             </Tabs.Tab>
+            <Tabs.Tab value="paid">Paid ({grouped.paid.length})</Tabs.Tab>
             <Tabs.Tab value="rejected">
               Rejected ({grouped.rejected.length})
             </Tabs.Tab>
             <Tabs.Tab value="abandoned">
               Abandoned ({grouped.abandoned.length})
             </Tabs.Tab>
+            <Tabs.Tab value="all">All ({grouped.all.length})</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="pending" pt="md">
@@ -626,12 +617,20 @@ export function SubmissionsTab({
             <RenderTabList items={grouped.approved} />
           </Tabs.Panel>
 
+          <Tabs.Panel value="paid" pt="md">
+            <RenderTabList items={grouped.paid} />
+          </Tabs.Panel>
+
           <Tabs.Panel value="rejected" pt="md">
             <RenderTabList items={grouped.rejected} />
           </Tabs.Panel>
 
           <Tabs.Panel value="abandoned" pt="md">
             <RenderTabList items={grouped.abandoned} />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="all" pt="md">
+            <RenderTabList items={grouped.all} />
           </Tabs.Panel>
         </Tabs>
       </Stack>

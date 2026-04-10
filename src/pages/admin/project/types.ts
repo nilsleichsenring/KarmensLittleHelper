@@ -102,6 +102,9 @@ export type SubmissionSummary = {
   reviewed_at: string | null;
   claim_status: ClaimStatus;
 
+  /* ✅ Final admin decision snapshot */
+  approved_amount_eur: number | null;
+
   /* 🆕 Payment */
   payment_status: PaymentStatus;
   payment_paid_at: string | null;
@@ -122,19 +125,18 @@ export type Participant = {
 
 export type Ticket = {
   id: string;
+  project_partner_submission_id: string;
+
   from_location: string;
   to_location: string;
-  travel_mode: string | null;
+  travel_mode: string;
 
-  currency: string;
   amount_eur: number;
-  amount_original: number | null;
+  file_url: string;
 
-  trip_type: "oneway" | "return" | "roundtrip" | null;
-  file_url: string | null;
+  approved: boolean;
+  admin_note?: string | null;
 
-  // 🆕 Admin review fields
-  approved: boolean;              // 🔒 required
-  admin_note?: string | null;     // optional (future-proof)
+  review_decision: "approved" | "rejected" | null;
+  reviewed_at: string | null;
 };
-

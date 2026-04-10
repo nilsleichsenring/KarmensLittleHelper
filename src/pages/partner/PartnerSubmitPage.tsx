@@ -10,6 +10,7 @@ import {
   Container,
   Group,
   Loader,
+  Paper,
   Stack,
   Table,
   Text,
@@ -17,17 +18,10 @@ import {
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
 
-import { generatePdf } from "../../lib/pdf/pdfEngine";
-import { renderPartnerSubmission } from "../../lib/pdf/renderers/partnerSubmission";
 import { deriveParticipantTravelTypes } from "../../lib/travel/travel";
-import {
-  countryCodeToName,
-} from "../../lib/flags";
+import { countryCodeToName } from "../../lib/flags";
 import { getTravelModeIcon } from "../../lib/travel/travelIcons";
-import {
-  getParticipantTravelModes,
-} from "../../lib/travel/participantTravel";
-
+import { getParticipantTravelModes } from "../../lib/travel/participantTravel";
 
 const SUBMISSION_STORAGE_PREFIX = "partner_submission_";
 
@@ -79,12 +73,11 @@ type Submission = {
   submitted: boolean;
   submitted_at: string | null;
 
-  // 🆕 Payment
+  // Payment
   payment_status: "unpaid" | "paid";
   payment_paid_at: string | null;
 
   created_at: string;
-
 };
 
 type Project = {
@@ -131,7 +124,6 @@ type TicketParticipantRow = {
 // HELPERS
 // ---------------------------------------------------------
 
-
 /**
  * Opens a ticket PDF in a new browser tab.
  * Uses the direct Supabase storage URL stored on the ticket.
@@ -154,7 +146,6 @@ function openTicketFile(fileUrl: string | null) {
     window.open(data.publicUrl, "_blank", "noopener,noreferrer");
   }
 }
-
 
 function renderAddressBlock(
   label: string,
@@ -249,18 +240,18 @@ export default function PartnerSubmitPage() {
   const [submissionId, setSubmissionId] = useState<string | null>(null);
 
   const [submission, setSubmission] = useState<Submission | null>(null);
-  const [project, setProject] = useState<Project | null>(null);
+  const [, setProject] = useState<Project | null>(null);
 
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
-  // ✅ NEU: Ticket ↔ Participant Join-Daten (für UI-Auswertung)
-  const [ticketParticipants, setTicketParticipants] =
-    useState<TicketParticipantRow[]>([]);
+  // Ticket ↔ Participant Join-Daten (für UI-Auswertung)
+  const [ticketParticipants, setTicketParticipants] = useState<
+    TicketParticipantRow[]
+  >([]);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -288,7 +279,7 @@ export default function PartnerSubmitPage() {
 
   // ---------------------------------------------------------
   // 2) Load Submission + Project + Participants + Tickets
-  //     ✅ Bug 2 Fix: robust tickets loading with fallback
+  //    robust tickets loading with fallback
   // ---------------------------------------------------------
   useEffect(() => {
     async function loadAll() {
@@ -345,7 +336,6 @@ export default function PartnerSubmitPage() {
 
         const participantsList = (partRows || []) as Participant[];
 
-
         // 4) Tickets (TRY strict select first)
         let ticketRows: any[] | null = null;
 
@@ -358,8 +348,11 @@ export default function PartnerSubmitPage() {
           .order("created_at", { ascending: true });
 
         if (strict.error) {
-          // ✅ Fallback: select("*") (mirrors Step 5 behavior)
-          console.error("Strict ticket select failed, falling back:", strict.error);
+          // Fallback: select("*") (mirrors Step 5 behavior)
+          console.error(
+            "Strict ticket select failed, falling back:",
+            strict.error
+          );
 
           const fallback = await supabase
             .from("tickets")
@@ -380,19 +373,18 @@ export default function PartnerSubmitPage() {
           ticketRows = strict.data as any[];
         }
 
-        const baseTickets =
-          (ticketRows || []).map((t: any) => ({
-            id: t.id,
-            from_location: t.from_location,
-            to_location: t.to_location,
-            travel_mode: t.travel_mode ?? null,
-            currency: t.currency ?? "EUR",
-            amount_original:
-              t.amount_original === undefined ? null : t.amount_original,
-            amount_eur: Number(t.amount_eur ?? 0),
-            trip_type: (t.trip_type as TripType | null) ?? null,
-            file_url: t.file_url ?? null,
-          })) as Omit<Ticket, "assigned_participants">[];
+        const baseTickets = (ticketRows || []).map((t: any) => ({
+          id: t.id,
+          from_location: t.from_location,
+          to_location: t.to_location,
+          travel_mode: t.travel_mode ?? null,
+          currency: t.currency ?? "EUR",
+          amount_original:
+            t.amount_original === undefined ? null : t.amount_original,
+          amount_eur: Number(t.amount_eur ?? 0),
+          trip_type: (t.trip_type as TripType | null) ?? null,
+          file_url: t.file_url ?? null,
+        })) as Omit<Ticket, "assigned_participants">[];
 
         if (baseTickets.length === 0) {
           setTickets([]);
@@ -417,9 +409,8 @@ export default function PartnerSubmitPage() {
         const tpList = (tpRows || []) as TicketParticipantRow[];
         setTicketParticipants(tpList);
 
-
         // ---------------------------------------------------------
-        // 🔹 K-4.2.1 — Derive travel type per participant (in-memory)
+        // Derive travel type per participant (in-memory)
         // ---------------------------------------------------------
         const travelByParticipant = deriveParticipantTravelTypes({
           participants: participantsList,
@@ -435,14 +426,15 @@ export default function PartnerSubmitPage() {
 
         setParticipants(participantsWithTravel);
 
-
         const enriched: Ticket[] = baseTickets.map((t) => ({
           ...t,
           assigned_participants:
             tpList
               .filter((tp) => tp.ticket_id === t.id)
               .map((tp) => {
-                const p = participantsList.find((x) => x.id === tp.participant_id);
+                const p = participantsList.find(
+                  (x) => x.id === tp.participant_id
+                );
                 return p ? p.full_name : "(unknown)";
               }) || [],
         }));
@@ -460,7 +452,7 @@ export default function PartnerSubmitPage() {
   }, [submissionId, navigate, projectToken]);
 
   // ---------------------------------------------------------
-  // Derived: Bug 1 display fixes (account holder + address)
+  // Derived: display fixes (account holder + address)
   // ---------------------------------------------------------
   const useOrgAddressForAccountHolder = useMemo(() => {
     if (!submission) return false;
@@ -477,7 +469,7 @@ export default function PartnerSubmitPage() {
     if (submission.account_holder && submission.account_holder.trim()) {
       return submission.account_holder;
     }
-    // ✅ Bug 1: fallback to organisation name if marker is active
+    // fallback to organisation name if marker is active
     if (useOrgAddressForAccountHolder) {
       return submission.organisation_name;
     }
@@ -496,7 +488,7 @@ export default function PartnerSubmitPage() {
     }
 
     if (useOrgAddressForAccountHolder) {
-      // ✅ Bug 1: show the organisation address as the account holder address
+      // show the organisation address as the account holder address
       return {
         line1: submission.address_line1,
         line2: submission.address_line2,
@@ -508,12 +500,26 @@ export default function PartnerSubmitPage() {
 
     // otherwise: use whichever bank/account-holder address fields exist
     return {
-      line1: submission.bank_address_line1 ?? submission.account_holder_address_line1 ?? null,
-      line2: submission.bank_address_line2 ?? submission.account_holder_address_line2 ?? null,
+      line1:
+        submission.bank_address_line1 ??
+        submission.account_holder_address_line1 ??
+        null,
+      line2:
+        submission.bank_address_line2 ??
+        submission.account_holder_address_line2 ??
+        null,
       postalCode:
-        submission.bank_address_postal_code ?? submission.account_holder_address_postal_code ?? null,
-      city: submission.bank_address_city ?? submission.account_holder_address_city ?? null,
-      region: submission.bank_address_region ?? submission.account_holder_address_region ?? null,
+        submission.bank_address_postal_code ??
+        submission.account_holder_address_postal_code ??
+        null,
+      city:
+        submission.bank_address_city ??
+        submission.account_holder_address_city ??
+        null,
+      region:
+        submission.bank_address_region ??
+        submission.account_holder_address_region ??
+        null,
     };
   }, [submission, useOrgAddressForAccountHolder]);
 
@@ -526,7 +532,9 @@ export default function PartnerSubmitPage() {
     if (!submissionId || !submission) return;
 
     if (hasDataIssues) {
-      setErrorMessage("You need at least one participant and one ticket before submitting.");
+      setErrorMessage(
+        "You need at least one participant and one ticket before submitting."
+      );
       return;
     }
 
@@ -556,36 +564,6 @@ export default function PartnerSubmitPage() {
       setSubmitting(false);
       setErrorMessage("Unexpected error while submitting.");
     }
-  }
-
-  // ---------------------------------------------------------
-  // 4) PDF download
-  // ---------------------------------------------------------
-  async function handleDownloadPdf() {
-    if (!submission || !project) return;
-
-    setDownloadingPdf(true);
-    setErrorMessage(null);
-
-    try {
-      const data = {
-        submission,
-        project,
-        participants,
-        tickets,
-      };
-
-      await generatePdf(
-        renderPartnerSubmission,
-        data,
-        `reimbursement_${submission.organisation_name.replace(/\s+/g, "_")}.pdf`
-      );
-    } catch (err) {
-      console.error(err);
-      setErrorMessage("Could not generate PDF.");
-    }
-
-    setDownloadingPdf(false);
   }
 
   // ---------------------------------------------------------
@@ -623,324 +601,316 @@ export default function PartnerSubmitPage() {
         <Stack>
           <Title order={2}>Submit</Title>
           <Alert color="red">
-            Submission could not be loaded. Please contact the host organisation.
+            Submission could not be loaded. Please contact the host
+            organisation.
           </Alert>
         </Stack>
       </Container>
     );
   }
 
-  const totalTicketsEur = tickets.reduce((sum, t) => sum + (t.amount_eur || 0), 0);
+  const totalTicketsEur = tickets.reduce(
+    (sum, t) => sum + (t.amount_eur || 0),
+    0
+  );
 
-return (
-  <Box style={{ minHeight: "100vh" }} bg="#f5f6fa">
-    <Container size="lg" py="xl">
-      <Stack gap="xl">
-        {/* Header */}
-        <Stack gap={4}>
-          <Text size="sm" c="dimmed">
-            Step 7 of 7
-          </Text>
-          <Title order={2}>Review & submit</Title>
-          <Text size="sm" c="dimmed">
-            Please review your data carefully. After submitting, you will not be
-            able to change it anymore.
-          </Text>
-        </Stack>
-
-        {/* Organisation & address */}
-        <Stack gap="sm">
-          <Text size="sm" c="dimmed">
-            Organisation
-          </Text>
-          <Text>
-            {submission.organisation_name} ({submission.country_code})
-          </Text>
-
-          {renderAddressBlock("Organisation address", {
-            line1: submission.address_line1,
-            line2: submission.address_line2,
-            postalCode: submission.address_postal_code,
-            city: submission.address_city,
-            region: submission.address_region,
-          })}
-        </Stack>
-
-        {/* Contact */}
-        <Stack gap={2}>
-          <Text size="sm" c="dimmed">
-            Contact person
-          </Text>
-          <Text>
-            {submission.contact_name || "-"}
-            {submission.contact_email ? ` — ${submission.contact_email}` : ""}
-          </Text>
-          {submission.contact_phone && (
-            <Text size="sm">Phone: {submission.contact_phone}</Text>
-          )}
-        </Stack>
-
-        {/* Bank */}
-        <Stack gap="sm">
-          <Text size="sm" c="dimmed">
-            Bank information
-          </Text>
-
-          <Text>
-            <strong>Account holder:</strong> {displayAccountHolder}
-          </Text>
-          <Text>
-            <strong>IBAN:</strong> {submission.iban || "-"}
-          </Text>
-          <Text>
-            <strong>BIC:</strong> {submission.bic || "-"}
-          </Text>
-
-          {submission.bank_name && (
-            <Text>
-              <strong>Bank name:</strong> {submission.bank_name}
-            </Text>
-          )}
-          {submission.bank_country && (
-            <Text>
-              <strong>Bank country:</strong> {submission.bank_country}
-            </Text>
-          )}
-
-          {renderAddressBlock("Account holder address", accountHolderAddress)}
-        </Stack>
-
-        {/* Participants */}
-        <Stack gap="xs">
-          <Group justify="space-between">
-            <Title order={4}>Participants</Title>
+  return (
+    <Box style={{ minHeight: "100vh" }} bg="#f5f6fa">
+      <Container size="lg" py="xl">
+        <Stack gap="xl">
+          {/* Header */}
+          <Stack gap={4}>
             <Text size="sm" c="dimmed">
-              {participants.length} participant
-              {participants.length === 1 ? "" : "s"}
+              Step 7 of 7
             </Text>
-          </Group>
+            <Title order={2}>Review & submit</Title>
+            <Text size="sm" c="dimmed">
+              Please review your data carefully. After submitting, you will not
+              be able to change it anymore.
+            </Text>
+          </Stack>
 
-          <Alert color="blue" variant="light">
-            Travel type (standard / green) is determined automatically by the
-            system based on the submitted tickets. No manual selection or
-            confirmation is required.
-          </Alert>
+          {/* Organisation */}
+          <Paper withBorder radius="md" p="lg">
+            <Stack gap="sm">
+              <Title order={4}>Organisation</Title>
 
-          <Table striped highlightOnHover withColumnBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th style={{ width: 180 }}>
-                  Residence country
-                </Table.Th>
+              <Text>
+                {submission.organisation_name} ({submission.country_code})
+              </Text>
 
-                {/* 🆕 Means of travel */}
-                <Table.Th style={{ width: 120, textAlign: "center" }}>
-                  Travel
-                </Table.Th>
-
-                <Table.Th style={{ width: 160 }}>
-                  Travel type
-                </Table.Th>
-                <Table.Th>Notes</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-
-            <Table.Tbody>
-              {participants.map((p) => {
-                const isGreen = !!p.is_green_travel;
-
-                const travelModes = getParticipantTravelModes(
-                  p.id,
-                  tickets,
-                  ticketParticipants
-                );
-
-                return (
-                  <Table.Tr key={p.id}>
-                    <Table.Td>{p.full_name}</Table.Td>
-
-                    <Table.Td>
-                      <Group gap="xs">
-                        {countryCodeToFlagSrc(p.residence_country) && (
-                          <img
-                            src={countryCodeToFlagSrc(p.residence_country)!}
-                            alt={p.residence_country}
-                            style={{
-                              width: 20,
-                              height: 14,
-                              objectFit: "contain",
-                              display: "block",
-                            }}
-                          />
-                        )}
-                        <Text>
-                          {countryCodeToName(p.residence_country)}
-                        </Text>
-                      </Group>
-                    </Table.Td>
-
-                    {/* 🆕 Travel modes (icons) */}
-                    <Table.Td style={{ textAlign: "center" }}>
-                      {travelModes.length > 0 ? (
-                        <Group gap={6} justify="center">
-                          {travelModes.map((mode) => (
-                            <Text key={mode} size="lg">
-                              {getTravelModeIcon(mode)}
-                            </Text>
-                          ))}
-                        </Group>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                    </Table.Td>
-
-                    <Table.Td>
-                      {renderTravelTypeBadge(isGreen)}
-                    </Table.Td>
-
-                    <Table.Td>
-                      {p.notes || (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                    </Table.Td>
-                  </Table.Tr>
-                );
+              {renderAddressBlock("Organisation address", {
+                line1: submission.address_line1,
+                line2: submission.address_line2,
+                postalCode: submission.address_postal_code,
+                city: submission.address_city,
+                region: submission.address_region,
               })}
+            </Stack>
+          </Paper>
 
-              {participants.length === 0 && (
-                <Table.Tr>
-                  <Table.Td colSpan={5}>
-                    No participants added.
-                  </Table.Td>
-                </Table.Tr>
+          {/* Contact person */}
+          <Paper withBorder radius="md" p="lg">
+            <Stack gap="sm">
+              <Title order={4}>Contact person</Title>
+
+              <Text>
+                {submission.contact_name || "-"}
+                {submission.contact_email ? ` — ${submission.contact_email}` : ""}
+              </Text>
+
+              {submission.contact_phone && (
+                <Text size="sm">Phone: {submission.contact_phone}</Text>
               )}
-            </Table.Tbody>
-          </Table>
-        </Stack>
+            </Stack>
+          </Paper>
 
+          {/* Bank information */}
+          <Paper withBorder radius="md" p="lg">
+            <Stack gap="sm">
+              <Title order={4}>Bank information</Title>
 
-        {/* Tickets */}
-        <Stack gap="xs">
-          <Group justify="space-between">
-            <Title order={4}>Tickets</Title>
-            <Text size="sm" c="dimmed">
-              {tickets.length} ticket
-              {tickets.length === 1 ? "" : "s"} — Total:{" "}
-              {totalTicketsEur.toFixed(2)} EUR
-            </Text>
+              <Text>
+                <strong>Account holder:</strong> {displayAccountHolder}
+              </Text>
+
+              <Text>
+                <strong>IBAN:</strong> {submission.iban || "-"}
+              </Text>
+
+              <Text>
+                <strong>BIC:</strong> {submission.bic || "-"}
+              </Text>
+
+              {submission.bank_name && (
+                <Text>
+                  <strong>Bank name:</strong> {submission.bank_name}
+                </Text>
+              )}
+
+              {submission.bank_country && (
+                <Text>
+                  <strong>Bank country:</strong> {submission.bank_country}
+                </Text>
+              )}
+
+              {renderAddressBlock("Account holder address", accountHolderAddress)}
+            </Stack>
+          </Paper>
+
+          {/* Participants */}
+          <Paper withBorder radius="md" p="lg">
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Title order={4}>Participants</Title>
+                <Text size="sm" c="dimmed">
+                  {participants.length} participant
+                  {participants.length === 1 ? "" : "s"}
+                </Text>
+              </Group>
+
+              <Alert color="blue" variant="light">
+                Travel type (standard / green) is determined automatically by the
+                system based on the submitted tickets. No manual selection or
+                confirmation is required.
+              </Alert>
+
+              <Table striped highlightOnHover withColumnBorders>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th style={{ width: 180 }}>
+                      Residence country
+                    </Table.Th>
+
+                    <Table.Th style={{ width: 120, textAlign: "center" }}>
+                      Travel
+                    </Table.Th>
+
+                    <Table.Th style={{ width: 160 }}>
+                      Travel type
+                    </Table.Th>
+                    <Table.Th>Notes</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+
+                <Table.Tbody>
+                  {participants.map((p) => {
+                    const isGreen = !!p.is_green_travel;
+
+                    const travelModes = getParticipantTravelModes(
+                      p.id,
+                      tickets,
+                      ticketParticipants
+                    );
+
+                    return (
+                      <Table.Tr key={p.id}>
+                        <Table.Td>{p.full_name}</Table.Td>
+
+                        <Table.Td>
+                          <Group gap="xs">
+                            {countryCodeToFlagSrc(p.residence_country) && (
+                              <img
+                                src={countryCodeToFlagSrc(p.residence_country)!}
+                                alt={p.residence_country}
+                                style={{
+                                  width: 20,
+                                  height: 14,
+                                  objectFit: "contain",
+                                  display: "block",
+                                }}
+                              />
+                            )}
+                            <Text>{countryCodeToName(p.residence_country)}</Text>
+                          </Group>
+                        </Table.Td>
+
+                        <Table.Td style={{ textAlign: "center" }}>
+                          {travelModes.length > 0 ? (
+                            <Group gap={6} justify="center">
+                              {travelModes.map((mode) => (
+                                <Text key={mode} size="lg">
+                                  {getTravelModeIcon(mode)}
+                                </Text>
+                              ))}
+                            </Group>
+                          ) : (
+                            <Text size="sm" c="dimmed">
+                              —
+                            </Text>
+                          )}
+                        </Table.Td>
+
+                        <Table.Td>{renderTravelTypeBadge(isGreen)}</Table.Td>
+
+                        <Table.Td>
+                          {p.notes || (
+                            <Text size="sm" c="dimmed">
+                              —
+                            </Text>
+                          )}
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+
+                  {participants.length === 0 && (
+                    <Table.Tr>
+                      <Table.Td colSpan={5}>
+                        No participants added.
+                      </Table.Td>
+                    </Table.Tr>
+                  )}
+                </Table.Tbody>
+              </Table>
+            </Stack>
+          </Paper>
+
+          {/* Tickets */}
+          <Paper withBorder radius="md" p="lg">
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Title order={4}>Tickets</Title>
+                <Text size="sm" c="dimmed">
+                  {tickets.length} ticket
+                  {tickets.length === 1 ? "" : "s"} — Total:{" "}
+                  {totalTicketsEur.toFixed(2)} EUR
+                </Text>
+              </Group>
+
+              <Table striped highlightOnHover withColumnBorders>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Route</Table.Th>
+                    <Table.Th>Details</Table.Th>
+                    <Table.Th>Amount</Table.Th>
+                    <Table.Th>Participants</Table.Th>
+                    <Table.Th style={{ width: 80, textAlign: "center" }}>
+                      Travel
+                    </Table.Th>
+                    <Table.Th>Ticket</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+
+                <Table.Tbody>
+                  {tickets.map((t) => (
+                    <Table.Tr key={t.id}>
+                      <Table.Td>
+                        {t.from_location} → {t.to_location}
+                      </Table.Td>
+
+                      <Table.Td>
+                        <Text size="sm">
+                          {t.travel_mode || "—"} · {formatTripType(t.trip_type)}
+                        </Text>
+                      </Table.Td>
+
+                      <Table.Td>
+                        <Text size="sm">
+                          {formatAmount(
+                            t.currency,
+                            t.amount_original,
+                            t.amount_eur
+                          )}
+                        </Text>
+                      </Table.Td>
+
+                      <Table.Td>
+                        {t.assigned_participants.length > 0
+                          ? t.assigned_participants.join(", ")
+                          : "—"}
+                      </Table.Td>
+
+                      <Table.Td style={{ textAlign: "center" }}>
+                        <Text size="lg">{getTravelModeIcon(t.travel_mode)}</Text>
+                      </Table.Td>
+
+                      <Table.Td>
+                        <Button
+                          variant="light"
+                          onClick={() => openTicketFile(t.file_url)}
+                        >
+                          View
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+
+                  {tickets.length === 0 && (
+                    <Table.Tr>
+                      <Table.Td colSpan={6}>
+                        <Text size="sm" c="dimmed">
+                          No tickets added.
+                        </Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )}
+                </Table.Tbody>
+              </Table>
+            </Stack>
+          </Paper>
+
+          {hasDataIssues && (
+            <Alert color="red">
+              You need at least one participant and one ticket before
+              submitting.
+            </Alert>
+          )}
+
+          {errorMessage && <Alert color="red">{errorMessage}</Alert>}
+
+          <Group justify="flex-end">
+            <Button
+              onClick={handleSubmit}
+              loading={submitting}
+              disabled={submitting || hasDataIssues}
+            >
+              Submit
+            </Button>
           </Group>
-
-          <Table striped highlightOnHover withColumnBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Route</Table.Th>
-                <Table.Th>Details</Table.Th>
-                <Table.Th>Amount</Table.Th>
-                <Table.Th>Participants</Table.Th>
-                <Table.Th
-                  style={{ width: 80, textAlign: "center" }}
-                >
-                  Travel
-                </Table.Th>
-                <Table.Th>Ticket</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-
-            <Table.Tbody>
-              {tickets.map((t) => (
-                <Table.Tr key={t.id}>
-                  <Table.Td>
-                    {t.from_location} → {t.to_location}
-                  </Table.Td>
-
-                  <Table.Td>
-                    <Text size="sm">
-                      {t.travel_mode || "—"} ·{" "}
-                      {formatTripType(t.trip_type)}
-                    </Text>
-                  </Table.Td>
-
-                  <Table.Td>
-                    <Text size="sm">
-                      {formatAmount(
-                        t.currency,
-                        t.amount_original,
-                        t.amount_eur
-                      )}
-                    </Text>
-                  </Table.Td>
-
-                  <Table.Td>
-                    {t.assigned_participants.length > 0
-                      ? t.assigned_participants.join(", ")
-                      : "—"}
-                  </Table.Td>
-
-                  <Table.Td style={{ textAlign: "center" }}>
-                    <Text size="lg">
-                      {getTravelModeIcon(t.travel_mode)}
-                    </Text>
-                  </Table.Td>
-
-                  <Table.Td>
-                    <Button
-                      variant="light"
-                      onClick={() =>
-                        openTicketFile(t.file_url)
-                      }
-                    >
-                      View
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-
-              {tickets.length === 0 && (
-                <Table.Tr>
-                  <Table.Td colSpan={6}>
-                    <Text size="sm" c="dimmed">
-                      No tickets added.
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-              )}
-            </Table.Tbody>
-          </Table>
         </Stack>
-
-        {hasDataIssues && (
-          <Alert color="red">
-            You need at least one participant and one ticket
-            before submitting.
-          </Alert>
-        )}
-
-        {errorMessage && <Alert color="red">{errorMessage}</Alert>}
-
-        <Group justify="space-between">
-          <Button
-            variant="outline"
-            onClick={handleDownloadPdf}
-            loading={downloadingPdf}
-          >
-            Download PDF
-          </Button>
-
-          <Button
-            onClick={handleSubmit}
-            loading={submitting}
-            disabled={submitting || hasDataIssues}
-          >
-            Submit
-          </Button>
-        </Group>
-      </Stack>
-    </Container>
-  </Box>
-);
+      </Container>
+    </Box>
+  );
 }

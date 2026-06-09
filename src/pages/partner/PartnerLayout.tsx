@@ -1,10 +1,13 @@
 // src/pages/partner/PartnerLayout.tsx
 
-import { Box, Container, Group, Text } from "@mantine/core";
+import { Box, Container } from "@mantine/core";
 import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 
 import AppHeader from "../../components/AppHeader";
+import StepNavigation, {
+  type StepNavigationItem,
+} from "../../components/StepNavigation";
 import PartnerResumeHeader from "./components/PartnerResumeHeader";
 
 const STORAGE_PREFIX = "partner_submission_";
@@ -18,7 +21,9 @@ const STEPS = [
   { label: "Participants", path: "participants" },
   { label: "Tickets", path: "tickets" },
   { label: "Review & Submit", path: "submit" },
-];
+] as const;
+
+type PartnerStepPath = (typeof STEPS)[number]["path"];
 
 export default function PartnerLayout() {
   const { projectToken } = useParams<{ projectToken: string }>();
@@ -33,6 +38,7 @@ export default function PartnerLayout() {
   // --------------------------------------------------
   useEffect(() => {
     if (!projectToken) return;
+
     const stored = localStorage.getItem(STORAGE_PREFIX + projectToken);
     setSubmissionId(stored);
   }, [projectToken]);
@@ -43,8 +49,8 @@ export default function PartnerLayout() {
   const currentStepIndex = useMemo(() => {
     if (!projectToken) return 0;
 
-    const foundIndex = STEPS.findIndex((s) =>
-      location.pathname.includes(`/p/${projectToken}/${s.path}`)
+    const foundIndex = STEPS.findIndex((step) =>
+      location.pathname.includes(`/p/${projectToken}/${step.path}`)
     );
 
     return foundIndex >= 0 ? foundIndex : 0;
@@ -66,7 +72,7 @@ export default function PartnerLayout() {
   }, [projectToken]);
 
   // --------------------------------------------------
-  // ⭐ BULLETPROOF MAX STEP MEMORY
+  // Max step memory
   // --------------------------------------------------
   useEffect(() => {
     if (!projectToken) return;
@@ -90,36 +96,48 @@ export default function PartnerLayout() {
   // --------------------------------------------------
   const isOnboarding = location.pathname === `/p/${projectToken}`;
 
-  const showHeader =
-    !isOnboarding && !!submissionId && !!projectToken;
+  const showHeader = !isOnboarding && !!submissionId && !!projectToken;
 
   // --------------------------------------------------
   // Navigation
   // --------------------------------------------------
-  function handleStepClick(stepIndex: number) {
+  function handleStepClick(stepPath: PartnerStepPath) {
     if (!projectToken) return;
+
+    const stepIndex = STEPS.findIndex((step) => step.path === stepPath);
+
+    if (stepIndex < 0) return;
     if (stepIndex > maxReachedStepIndex) return;
 
-    navigate(`/p/${projectToken}/${STEPS[stepIndex].path}`);
+    navigate(`/p/${projectToken}/${stepPath}`);
   }
 
-  // --------------------------------------------------
-  // Inline Styling Base
-  // --------------------------------------------------
-  const circleBaseStyle = {
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 14,
-    fontWeight: 600,
-    transition: "all 0.15s ease",
-  };
+  const navigationSteps: StepNavigationItem<PartnerStepPath>[] = STEPS.map(
+    (step, index) => {
+      const isActive = index === safeStepIndex;
+      const isCompleted = index < safeStepIndex;
+      const isAvailable =
+        index > safeStepIndex && index <= maxReachedStepIndex;
+      const isLocked = index > maxReachedStepIndex;
+
+      return {
+        key: step.path,
+        label: step.label,
+        status: isActive
+          ? "active"
+          : isCompleted
+            ? "completed"
+            : isAvailable
+              ? "available"
+              : isLocked
+                ? "locked"
+                : "pending",
+      };
+    }
+  );
 
   // --------------------------------------------------
-  // RENDER
+  // Render
   // --------------------------------------------------
   return (
     <>
@@ -128,88 +146,28 @@ export default function PartnerLayout() {
           homePath={`/p/${projectToken}`}
           right={
             <PartnerResumeHeader
-              projectToken={projectToken!}
+              projectToken={projectToken}
               submissionId={submissionId}
             />
           }
         />
       )}
 
-      {/* STEP NAVIGATOR */}
       {showHeader && (
-          <Box
-            style={{
-              position: "sticky",
-              top: 88, // Höhe des AppHeaders
-              zIndex: 90,
-              borderBottom: "1px solid #e9ecef",
-              background: "#ffffff",
-            }}
-          >
-
+        <Box
+          style={{
+            position: "sticky",
+            top: 88,
+            zIndex: 90,
+            borderBottom: "1px solid #e9ecef",
+            background: "#ffffff",
+          }}
+        >
           <Container size="lg" py="sm">
-            <Group gap="md">
-              {STEPS.map((step, index) => {
-                const isActive = index === safeStepIndex;
-                const isCompleted = index < safeStepIndex;
-                const isAvailable =
-                  index > safeStepIndex &&
-                  index <= maxReachedStepIndex;
-                const isLocked = index > maxReachedStepIndex;
-
-                const isClickable = !isLocked;
-
-                return (
-                  <Group
-                    key={step.label}
-                    gap={6}
-                    style={{
-                      cursor: isClickable ? "pointer" : "not-allowed",
-                      opacity: isLocked ? 0.5 : 1,
-                    }}
-                    onClick={() => handleStepClick(index)}
-                  >
-                    <Box
-                      style={{
-                        ...circleBaseStyle,
-                        background: isActive
-                          ? "#228be6"
-                          : isCompleted
-                          ? "#40c057"
-                          : isAvailable
-                          ? "#e7f5ff"
-                          : "#dee2e6",
-                        border: isAvailable
-                          ? "2px solid #4dabf7"
-                          : "2px solid transparent",
-                        color:
-                          isActive || isCompleted
-                            ? "white"
-                            : "#495057",
-                      }}
-                    >
-                      {index + 1}
-                    </Box>
-
-                    <Text
-                      size="sm"
-                      fw={isActive ? 600 : 400}
-                      c={
-                        isActive
-                          ? "blue"
-                          : isCompleted
-                          ? "dark"
-                          : isAvailable
-                          ? "blue"
-                          : "dimmed"
-                      }
-                    >
-                      {step.label}
-                    </Text>
-                  </Group>
-                );
-              })}
-            </Group>
+            <StepNavigation
+              steps={navigationSteps}
+              onStepClick={handleStepClick}
+            />
           </Container>
         </Box>
       )}

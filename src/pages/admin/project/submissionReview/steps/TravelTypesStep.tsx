@@ -102,7 +102,7 @@ export default function TravelTypesStep({ participants, tickets }: Props) {
             (t) => t.review_decision === "approved"
           );
 
-          const hasNoTickets = stats.total === 0;
+          const hasNoApprovedTickets = stats.approved === 0;
 
           return (
             <Accordion.Item key={p.id} value={p.id}>
@@ -118,7 +118,7 @@ export default function TravelTypesStep({ participants, tickets }: Props) {
 
                   <Badge
                     color={
-                      hasNoTickets
+                      hasNoApprovedTickets
                         ? "red"
                         : travelType === "green"
                         ? "green"
@@ -126,7 +126,7 @@ export default function TravelTypesStep({ participants, tickets }: Props) {
                     }
                     variant="light"
                   >
-                    {hasNoTickets
+                    { hasNoApprovedTickets
                       ? "No tickets!"
                       : travelType === "green"
                       ? "Green travel"
@@ -138,17 +138,11 @@ export default function TravelTypesStep({ participants, tickets }: Props) {
               <Accordion.Panel>
                 <Card withBorder radius="md" p="md">
                   <Stack gap="xs">
-                    {hasNoTickets && (
+                    {hasNoApprovedTickets && (
                       <Text size="sm" c="red">
                         This participant has no approved ticket. Therefore,
                         the participant is not eligible to reimburse travel
                         costs.
-                      </Text>
-                    )}
-
-                    {!hasNoTickets && participantApprovedTickets.length === 0 && (
-                      <Text size="sm" c="orange">
-                        No approved tickets yet.
                       </Text>
                     )}
 

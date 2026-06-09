@@ -352,7 +352,7 @@ export default function PartnerDonePage() {
           {info && (
             <Paper withBorder radius="md" p="lg">
               <Stack gap="sm">
-                <Title order={4}>Submission details</Title>
+                <Title order={4}>Claim details</Title>
 
                 <Stack gap={4}>
                   <Text size="sm" c="dimmed">

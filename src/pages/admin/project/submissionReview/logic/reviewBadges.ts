@@ -1,17 +1,17 @@
-import type { ProjectPartnerOrg, SubmissionSummary } from "../../types";
+import type { ProjectPartnerOrg, ClaimSummary } from "../../types";
 
-export type SubmissionBadge = {
+export type ClaimBadge = {
   key: string;
   label: string;
   color: "gray" | "green" | "yellow" | "blue" | "red";
 };
 
-export function getSubmissionBadges(
-  submission: SubmissionSummary,
+export function getClaimBadges(
+  submission: ClaimSummary,
   partnerOrg: ProjectPartnerOrg | null,
   opts?: { showDistanceBadge?: boolean }
-): SubmissionBadge[] {
-  const badges: SubmissionBadge[] = [];
+): ClaimBadge[] {
+  const badges: ClaimBadge[] = [];
   const showDistanceBadge = opts?.showDistanceBadge ?? true;
 
   if (showDistanceBadge && (!partnerOrg || partnerOrg.distance_km == null)) {

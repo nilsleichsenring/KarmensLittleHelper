@@ -16,8 +16,11 @@ export type Project = {
   end_date: string | null;
   internal_notes: string | null;
 
-  // 👇 NEU – das fehlende Puzzlestück
+  // Partner flow
   project_access_token: string | null;
+
+  // Participant onboarding flow
+  participant_access_token: string | null;
 
   // Host organisation info (JOIN via organisations table)
   organisations?: {
@@ -77,6 +80,26 @@ export type CountryRef = {
   name: string;
 };
 
+export type ProjectParticipantSummary = {
+  id: string;
+  project_id: string;
+  resume_token: string;
+  full_name: string | null;
+  email: string | null;
+  residence_country: string | null;
+
+  food_preferences: string[] | null;
+  health_issues: string | null;
+  additional_information: string | null;
+
+  media_consent: boolean | null;
+  future_projects_consent: boolean | null;
+
+  agreement_accepted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 /* =========================================================
    CLAIM / SUBMISSION
 ========================================================= */
@@ -90,7 +113,7 @@ export type ClaimStatus =
 
 export type PaymentStatus = "unpaid" | "paid";
 
-export type SubmissionSummary = {
+export type ClaimSummary = {
   id: string;
   project_id: string;
   country_code: string;
@@ -101,6 +124,7 @@ export type SubmissionSummary = {
 
   reviewed_at: string | null;
   claim_status: ClaimStatus;
+  rejection_reason: string | null;
 
   /* ✅ Final admin decision snapshot */
   approved_amount_eur: number | null;

@@ -1,15 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Button,
   Container,
   Group,
-  Text,
-  UnstyledButton,
 } from "@mantine/core";
 import { useParams } from "react-router-dom";
 
 import AppHeader from "../../../../components/AppHeader";
+
+import StepNavigation, {
+  type StepNavigationItem,
+} from "../../../../components/StepNavigation";
+
 import {
   reviewSteps,
   type ReviewStep,
@@ -49,7 +52,7 @@ export default function AdminReviewLayout({
   const steps: ReviewStep[] = reviewSteps;
 
   const [activeStep, setActiveStep] = useState<ReviewStepKey>(
-    steps[0].key
+    isClaimFinal ? "decision" : steps[0].key
   );
 
   /* -------------------------------------------------- */
@@ -64,13 +67,31 @@ export default function AdminReviewLayout({
         step.key,
         {
           completed:
+            isClaimFinal ||
+            step.key === "context" ||
             (step.key === "distance" && hasDistance) ||
-            (step.key === "tickets" && allTicketsReviewed) ||
-            (step.key === "decision" && isClaimFinal),
+            (step.key === "tickets" && allTicketsReviewed),
         },
       ])
     ) as Record<ReviewStepKey, ReviewStepState>
   );
+
+  useEffect(() => {
+    if (!isClaimFinal) return;
+
+    setActiveStep("decision");
+
+    setStepState(
+      Object.fromEntries(
+        steps.map((step) => [
+          step.key,
+          {
+            completed: true,
+          },
+        ])
+      ) as Record<ReviewStepKey, ReviewStepState>
+    );
+  }, [isClaimFinal, steps]);
 
   function markStepCompleted(step: ReviewStepKey) {
     setStepState((prev) => ({
@@ -117,6 +138,26 @@ export default function AdminReviewLayout({
   const isLastStep = currentIndex === stepKeys.length - 1;
   const nextStepBlocked = !isLastStep && isStepBlocked(currentIndex + 1);
 
+  const navigationSteps: StepNavigationItem<ReviewStepKey>[] = steps.map(
+    (step, index) => {
+      const isActive = step.key === activeStep;
+      const isBlocked = isStepBlocked(index);
+      const isCompleted = stepState[step.key].completed;
+
+      return {
+        key: step.key,
+        label: step.label,
+          status: isActive
+            ? "active"
+            : isCompleted || index < currentIndex
+              ? "completed"
+              : isBlocked
+                ? "locked"
+                : "available"
+      };
+    }
+  );
+
   /* -------------------------------------------------- */
   /* Render                                             */
   /* -------------------------------------------------- */
@@ -144,56 +185,10 @@ export default function AdminReviewLayout({
         }}
       >
         <Container size="lg" py="sm">
-          <Group gap="md">
-            {steps.map((step, index) => {
-              const isActive = step.key === activeStep;
-              const isBlocked = isStepBlocked(index);
-
-              return (
-                <UnstyledButton
-                  key={step.key}
-                  disabled={isBlocked}
-                  onClick={() =>
-                    !isBlocked && setActiveStep(step.key)
-                  }
-                >
-                  <Group
-                    gap={6}
-                    style={{ opacity: isBlocked ? 0.4 : 1 }}
-                  >
-                    <Box
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: "50%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        fontWeight: 600,
-                        background: isActive
-                          ? "#228be6"
-                          : "#dee2e6",
-                        color: isActive
-                          ? "white"
-                          : "#495057",
-                      }}
-                    >
-                      {index + 1}
-                    </Box>
-
-                    <Text
-                      size="sm"
-                      fw={isActive ? 600 : 400}
-                      c={isActive ? "blue" : "dimmed"}
-                    >
-                      {step.label}
-                    </Text>
-                  </Group>
-                </UnstyledButton>
-              );
-            })}
-          </Group>
+          <StepNavigation
+            steps={navigationSteps}
+            onStepClick={setActiveStep}
+          />
         </Container>
       </Box>
 

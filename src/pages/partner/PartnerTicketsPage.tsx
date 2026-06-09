@@ -707,9 +707,9 @@ export default function PartnerTicketsPage() {
               label={
                 <Group gap={6} align="center">
                   <span>Means of travel</span>
-                  <HelpTooltip
-                    label="I love u, babes! ❤️"
-                  />
+                    <HelpTooltip
+                      label="Select the means of travel used for this ticket."
+                    />
                 </Group>
               }
               placeholder="Select mode"

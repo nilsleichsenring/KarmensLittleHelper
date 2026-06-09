@@ -13,7 +13,7 @@ import { supabase } from "../../../../../lib/supabaseClient";
 import { applyDistanceUpdate } from "../../../../../lib/travel/applyDistanceUpdate";
 import { saveDistance as persistDistance } from "../logic/reviewPersistence";
 
-import type { SubmissionSummary } from "../../types";
+import type { ClaimSummary } from "../../types";
 import { useReviewStep } from "../ReviewStepContext";
 
 /* ------------------------------------------------------------------ */
@@ -21,7 +21,7 @@ import { useReviewStep } from "../ReviewStepContext";
 /* ------------------------------------------------------------------ */
 
 type Props = {
-  submission: SubmissionSummary;
+  submission: ClaimSummary;
   isClaimFinal: boolean;
   onDistanceCalculated: (result: {
     distanceKm: number;

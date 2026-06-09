@@ -112,7 +112,7 @@ export default function PartnerSetupPage() {
     );
 
     if (!submissionId) {
-      setError("Submission not found. Please restart the process.");
+      setError("Reimbursement claim not found. Please restart the process.");
       return;
     }
 

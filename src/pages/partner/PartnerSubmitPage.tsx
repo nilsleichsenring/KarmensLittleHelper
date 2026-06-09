@@ -601,7 +601,7 @@ export default function PartnerSubmitPage() {
         <Stack>
           <Title order={2}>Submit</Title>
           <Alert color="red">
-            Submission could not be loaded. Please contact the host
+            Reimbursement claim could not be loaded. Please contact the host
             organisation.
           </Alert>
         </Stack>

@@ -1,10 +1,10 @@
 // src/pages/admin/project/submissionReview/steps/PaymentStep.tsx
 
 import { Card, Stack, Text, Button, Badge, Group } from "@mantine/core";
-import type { SubmissionSummary } from "../../types";
+import type { ClaimSummary } from "../../types";
 
 type Props = {
-  submission: SubmissionSummary;
+  submission: ClaimSummary;
 
   amountToPay: number;
 

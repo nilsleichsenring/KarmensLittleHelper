@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../../../lib/supabaseClient";
 
 import type {
-  SubmissionSummary,
+  ClaimSummary,
   Participant,
   Ticket,
   ProjectPartnerOrg,
@@ -29,11 +29,12 @@ type InitialDistanceResult = {
   greenRate: number;
 } | null;
 
-type UseSubmissionReviewResult = {
+type UseClaimReviewResult = {
   loading: boolean;
   error: string | null;
 
-  submission: SubmissionSummary | null;
+  submission: ClaimSummary | null;
+  updateClaim: (payload: Partial<ClaimSummary>) => void;
   partnerOrg: ProjectPartnerOrg | null;
   participants: Participant[];
   tickets: AdminTicket[];
@@ -52,14 +53,14 @@ type UseSubmissionReviewResult = {
   hasDistance: boolean;
 };
 
-export function useSubmissionReview(
+export function useClaimReview(
   submissionId: string | null,
   enabled = true
-): UseSubmissionReviewResult {
+): UseClaimReviewResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+  const [claim, setClaim] = useState<ClaimSummary | null>(null);
   const [partnerOrg, setPartnerOrg] = useState<ProjectPartnerOrg | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [tickets, setTickets] = useState<AdminTicket[]>([]);
@@ -85,7 +86,7 @@ export function useSubmissionReview(
         if (subError) throw subError;
         if (!active) return;
 
-        setSubmission(submissionData as SubmissionSummary);
+        setClaim(submissionData as ClaimSummary);
 
         const { data: orgData, error: orgError } = await supabase
           .from("project_partner_orgs")
@@ -120,7 +121,6 @@ export function useSubmissionReview(
             travel_mode,
             amount_eur,
             file_url,
-            approved,
             admin_note,
             review_decision,
             reviewed_at,
@@ -142,7 +142,7 @@ export function useSubmissionReview(
             to_location: t.to_location,
             travel_mode: t.travel_mode,
             amount_eur: Number(t.amount_eur ?? 0),
-            approved: t.approved ?? false,
+            approved: t.review_decision === "approved",
             admin_note: t.admin_note ?? null,
             review_decision: t.review_decision ?? null,
             reviewed_at: t.reviewed_at ?? null,
@@ -232,17 +232,22 @@ export function useSubmissionReview(
   );
 
   const isClaimFinal =
-    submission?.claim_status === "approved" ||
-    submission?.claim_status === "adjusted" ||
-    submission?.claim_status === "rejected";
+    claim?.claim_status === "approved" ||
+    claim?.claim_status === "adjusted" ||
+    claim?.claim_status === "rejected";
 
   const hasDistance = distance.distanceKm != null;
+
+  function updateClaim(payload: Partial<ClaimSummary>) {
+    setClaim((prev) => (prev ? { ...prev, ...payload } : prev));
+  }
 
   return {
     loading,
     error,
 
-    submission,
+    submission: claim,
+    updateClaim,
     partnerOrg,
     participants,
     tickets,

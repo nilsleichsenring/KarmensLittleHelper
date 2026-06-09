@@ -2,9 +2,71 @@
 import { PdfEngine, cleanText } from "../pdfEngine";
 
 type Participant = {
+  id: string;
   full_name: string;
-  is_green_travel: boolean | null;
+  travel_type: "green" | "standard";
 };
+
+type AdminPdfTicket = {
+  from_location: string;
+  to_location: string;
+  amount_eur: number;
+  file_url: string | null;
+  travel_mode?: string | null;
+  review_decision?: "approved" | "rejected" | null;
+  reviewed_at?: string | null;
+  assigned_participants?: string[];
+};
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function formatEur(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `${Number(value).toFixed(2)} EUR`;
+}
+
+function getStatusLabel(status: "open" | "approved" | "adjusted" | "rejected") {
+  switch (status) {
+    case "approved":
+      return "Approved";
+
+    case "adjusted":
+      return "Partially approved";
+
+    case "rejected":
+      return "Rejected";
+
+    case "open":
+    default:
+      return "Open";
+  }
+}
+
+function getTicketDecisionLabel(
+  decision: "approved" | "rejected" | null | undefined
+) {
+  switch (decision) {
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    default:
+      return "Not reviewed";
+  }
+}
 
 export async function renderAdminSubmission(
   pdf: PdfEngine,
@@ -14,21 +76,33 @@ export async function renderAdminSubmission(
       country_code: string;
       submitted_at: string | null;
       reviewed_at: string | null;
-      claim_status: "open" | "approved" | "adjusted";
+      claim_status: "open" | "approved" | "adjusted" | "rejected";
+      approved_amount_eur: number | null;
+      rejection_reason: string | null;
+      payment_status: "unpaid" | "paid";
+      payment_paid_at: string | null;
     };
-    participants: Participant[];
-    tickets: {
-      from_location: string;
-      to_location: string;
-      amount_eur: number;
-      file_url: string | null;
-      assigned_participants: string[];
-    }[];
+      participants: Participant[];
+      tickets: AdminPdfTicket[];
+
+      summary: {
+        claimedAmount: number;
+        approvedTicketsAmount: number;
+        eligibleAmount: number | null;
+        amountToApprove: number;
+        standardParticipantsCount: number;
+        greenParticipantsCount: number;
+      };
+
     project: {
       name: string;
       start_date: string | null;
       end_date: string | null;
       project_reference: string | null;
+      organisations?: {
+        name: string;
+        country_code: string;
+      } | null;
     };
     rates: {
       standard: number;
@@ -36,137 +110,96 @@ export async function renderAdminSubmission(
     };
   }
 ) {
-  const { submission, participants, tickets, project, rates } = data;
+  const {
+    submission,
+    participants,
+    tickets,
+    summary,
+    project,
+    rates,
+  } = data;
 
-  // ---------------------------------------------------
-  // HEADER
-  // ---------------------------------------------------
-  pdf.title("Travel Reimbursement – Admin Review");
+  const finalApprovedAmount =
+    submission.approved_amount_eur ??
+    (submission.claim_status === "open" ? null : 0);
 
-  // ---------------------------------------------------
-  // PROJECT
-  // ---------------------------------------------------
-  pdf.subtitle("Project");
+  const claimedTotal = summary.claimedAmount;
+
+  const approvedTicketsTotal = summary.approvedTicketsAmount;
+
+  const eligibleAmount = summary.eligibleAmount;
+
+  const greenCount = summary.greenParticipantsCount;
+
+  const standardCount = summary.standardParticipantsCount;
+
+  // removed: balance is intentionally not shown in this summary PDF
+
+  pdf.title("Travel Reimbursement Claim Summary");
+
+  pdf.subtitle("Project information");
   pdf.field("Project:", cleanText(project.name));
   pdf.field("Reference:", cleanText(project.project_reference || "—"));
 
   let dateLine = "—";
   if (project.start_date && project.end_date) {
-    dateLine = `${project.start_date} → ${project.end_date}`;
+    dateLine = `${project.start_date} -> ${project.end_date}`;
   } else if (project.start_date) {
     dateLine = `from ${project.start_date}`;
   } else if (project.end_date) {
     dateLine = `until ${project.end_date}`;
   }
-  pdf.field("Dates:", cleanText(dateLine));
-  pdf.line();
 
-  // ---------------------------------------------------
-  // SUBMISSION META
-  // ---------------------------------------------------
-  pdf.subtitle("Submission");
+  pdf.field("Dates:", cleanText(dateLine));
 
   pdf.field(
-    "Organisation:",
+    "Host organisation:",
+    project.organisations
+      ? `${cleanText(project.organisations.name)} (${cleanText(
+          project.organisations.country_code
+        )})`
+      : "—"
+  );
+
+  pdf.line();
+
+  pdf.subtitle("Claim information");
+  pdf.field(
+    "Partner organisation:",
     `${cleanText(submission.organisation_name)} (${cleanText(
       submission.country_code
     )})`
   );
 
-  if (submission.submitted_at) {
-    pdf.field("Submitted at:", new Date(submission.submitted_at).toLocaleString());
-  }
-
-  if (submission.reviewed_at) {
-    pdf.field("Reviewed at:", new Date(submission.reviewed_at).toLocaleString());
-  }
-
-  const statusLabel =
-    submission.claim_status === "approved"
-      ? "Approved"
-      : submission.claim_status === "adjusted"
-      ? "Approved with changes"
-      : "Open (not reviewed)";
-
-  pdf.field("Status:", statusLabel);
+  pdf.field("Submitted on:", formatDateTime(submission.submitted_at));
+  pdf.field("Reviewed on:", formatDateTime(submission.reviewed_at));
   pdf.line();
 
-  // ---------------------------------------------------
-  // RATES (what admin used)
-  // ---------------------------------------------------
-  pdf.subtitle("Rates used (from partner organisation)");
-  pdf.field("Standard rate:", `${Number(rates.standard || 0).toFixed(2)} EUR`);
-  pdf.field("Green rate:", `${Number(rates.green || 0).toFixed(2)} EUR`);
+  pdf.subtitle("Financial summary");
+  pdf.field("Claimed amount:", formatEur(claimedTotal));
+  pdf.field("Approved tickets amount:", formatEur(approvedTicketsTotal));
+  pdf.field("Eligible amount:", formatEur(eligibleAmount));
+  pdf.field("Final approved amount:", formatEur(finalApprovedAmount));
   pdf.line();
 
-  // ---------------------------------------------------
-  // CLAIMED TOTAL (Tickets)
-  // ---------------------------------------------------
-  const claimedTotal = tickets.reduce((sum, t) => sum + (t.amount_eur || 0), 0);
-
-  pdf.subtitle("Claimed amount (submitted)");
-  pdf.field("Tickets:", `${tickets.length}`);
-  pdf.field("Total claimed:", `${claimedTotal.toFixed(2)} EUR`);
+  pdf.subtitle("Rates used");
+  pdf.field("Standard rate:", formatEur(rates.standard));
+  pdf.field("Green rate:", formatEur(rates.green));
+  pdf.field(
+    "Participant breakdown:",
+    `${greenCount} green, ${standardCount} standard`
+  );
   pdf.line();
 
-  // ---------------------------------------------------
-  // APPROVED TOTAL (Participants × Rates)
-  // ---------------------------------------------------
-  let approvedTotal = 0;
-  let greenCount = 0;
-  let standardCount = 0;
-
-  participants.forEach((p) => {
-    // Fallback: wenn null/undefined => Standard
-    const isGreen = !!p.is_green_travel;
-
-    if (isGreen) {
-      approvedTotal += rates.green || 0;
-      greenCount++;
-    } else {
-      approvedTotal += rates.standard || 0;
-      standardCount++;
-    }
-  });
-
-  pdf.subtitle("Approved amount (after admin review)");
-  pdf.field("Participants total:", `${participants.length}`);
-  pdf.field("Breakdown:", `${greenCount} × Green, ${standardCount} × Standard`);
-  pdf.field("Approved total:", `${approvedTotal.toFixed(2)} EUR`);
-  pdf.line();
-
-  // ---------------------------------------------------
-  // DIFFERENCE
-  // ---------------------------------------------------
-  const diff = claimedTotal - approvedTotal;
-
-  pdf.subtitle("Claimed vs approved");
-  pdf.field("Claimed (submitted):", `${claimedTotal.toFixed(2)} EUR`);
-  pdf.field("Approved (max allowed):", `${approvedTotal.toFixed(2)} EUR`);
-  pdf.field("Claimed − Approved:", `${diff.toFixed(2)} EUR`);
-
-  if (diff > 0) {
-    pdf.paragraph("⚠ Overclaimed: claimed amount exceeds approved maximum.");
-  } else if (diff < 0) {
-    pdf.paragraph("ℹ Below maximum: claimed amount is below approved maximum.");
-  } else {
-    pdf.paragraph("✓ Exact match: claimed amount equals approved maximum.");
-  }
-
-  pdf.line();
-
-  // ---------------------------------------------------
-  // PARTICIPANTS (APPROVED STATE)
-  // ---------------------------------------------------
-  pdf.subtitle("Participants (approved travel type)");
+  pdf.subtitle("Participants and travel type");
 
   if (participants.length === 0) {
     pdf.paragraph("None");
   } else {
-    participants.forEach((p) => {
+    participants.forEach((participant) => {
       pdf.paragraph(
-        `• ${cleanText(p.full_name)} – ${
-          p.is_green_travel ? "Green travel" : "Standard travel"
+        `- ${cleanText(participant.full_name)} - ${
+          participant.travel_type === "green" ? "Green travel" : "Standard travel"
         }`
       );
     });
@@ -174,35 +207,92 @@ export async function renderAdminSubmission(
 
   pdf.line();
 
-  // ---------------------------------------------------
-  // TICKETS (CLAIMED)
-  // ---------------------------------------------------
-  pdf.subtitle("Tickets (claimed)");
+  pdf.subtitle("Tickets and supporting documents");
 
   if (tickets.length === 0) {
     pdf.paragraph("No tickets submitted.");
   } else {
-    tickets.forEach((t, i) => {
-      pdf.paragraph(
-        `${i + 1}. ${cleanText(t.from_location)} → ${cleanText(
-          t.to_location
-        )} – ${t.amount_eur.toFixed(2)} EUR`
+    tickets.forEach((ticket, index) => {
+    pdf.paragraph(`Ticket ${index + 1}`);
+
+    pdf.field(
+      "Route:",
+      `${cleanText(ticket.from_location)} -> ${cleanText(
+        ticket.to_location
+      )}`
+    );
+
+    pdf.field(
+      "Travel mode:",
+      cleanText(ticket.travel_mode || "—")
+    );
+
+    pdf.field(
+      "Participants:",
+      ticket.assigned_participants?.length
+        ? cleanText(ticket.assigned_participants.join(", "))
+        : "—"
+    );
+
+    pdf.field(
+      "Amount:",
+      formatEur(ticket.amount_eur)
+    );
+
+    pdf.field(
+      "Decision:",
+      getTicketDecisionLabel(ticket.review_decision)
+    );
+
+    if (ticket.reviewed_at) {
+      pdf.field(
+        "Reviewed on:",
+        formatDateTime(ticket.reviewed_at)
       );
+    }
+
+    pdf.spacer(1);
     });
   }
 
-  // ---------------------------------------------------
-  // ATTACHMENTS
-  // ---------------------------------------------------
+  pdf.line();
+
+  pdf.subtitle("Final decision");
+
+  pdf.field("Decision:", getStatusLabel(submission.claim_status));
+
+  pdf.field(
+    "Approved amount:",
+    formatEur(finalApprovedAmount)
+  );
+
+  pdf.field("Payment status:", submission.payment_status);
+
+  if (submission.payment_status === "paid") {
+    pdf.field(
+      "Paid on:",
+      formatDateTime(submission.payment_paid_at)
+    );
+  }
+
+  if (submission.claim_status === "rejected") {
+    pdf.field(
+      "Reason for rejection:",
+      cleanText(
+        submission.rejection_reason || "No rejection reason stored."
+      )
+    );
+  }
+
   for (let i = 0; i < tickets.length; i++) {
-    const t = tickets[i];
+    const ticket = tickets[i];
 
     await pdf.attachTicketPdf({
-      file_url: t.file_url,
+      file_url: ticket.file_url,
       label: `Ticket ${i + 1}`,
-      meta: `${cleanText(t.from_location)} → ${cleanText(
-        t.to_location
-      )} (${t.amount_eur.toFixed(2)} EUR)`,
+      meta: `${cleanText(ticket.from_location)} -> ${cleanText(
+        ticket.to_location
+      )} (${formatEur(ticket.amount_eur)})`,
     });
   }
 }

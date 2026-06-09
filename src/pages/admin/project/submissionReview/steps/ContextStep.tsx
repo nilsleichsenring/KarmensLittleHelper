@@ -9,13 +9,13 @@ import {
 import CountryFlag from "../../../../../components/CountryFlag";
 
 import type {
-  SubmissionSummary,
+  ClaimSummary,
   Project,
   ProjectCountry,
 } from "../../types";
 
 type Props = {
-  submission: SubmissionSummary;
+  submission: ClaimSummary;
   project: Project;
   countries: ProjectCountry[];
   getCountryLabel: (code: string | null) => string;
@@ -27,7 +27,7 @@ type Props = {
 /* ------------------------------------------------------------------ */
 
 function getStatusLabel(
-  claimStatus: SubmissionSummary["claim_status"] | null
+  claimStatus: ClaimSummary["claim_status"] | null
 ): string {
   switch (claimStatus) {
     case "approved":
@@ -46,7 +46,7 @@ function getStatusLabel(
 }
 
 function getStatusColor(
-  claimStatus: SubmissionSummary["claim_status"] | null
+  claimStatus: ClaimSummary["claim_status"] | null
 ): string {
   switch (claimStatus) {
     case "approved":
@@ -65,7 +65,7 @@ function getStatusColor(
 }
 
 function getPaymentColor(
-  paymentStatus: SubmissionSummary["payment_status"] | null
+  paymentStatus: ClaimSummary["payment_status"] | null
 ): string {
   switch (paymentStatus) {
     case "paid":
@@ -199,7 +199,7 @@ export default function ContextStep({
 
       <Card withBorder radius="md" p="md">
         <Stack gap={4}>
-          <Text fw={600}>Submission meta</Text>
+          <Text fw={600}>Claim meta</Text>
 
           <Text size="sm">
             Submitted at:{" "}

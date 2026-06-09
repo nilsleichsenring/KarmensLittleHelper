@@ -14,17 +14,19 @@ import {
 import { OverviewTab } from "./project/tabs/OverviewTab";
 import { CountryTab } from "./project/tabs/CountryTab";
 import { PartnersTab } from "./project/tabs/PartnersTab";
-import { SubmissionsTab } from "./project/tabs/SubmissionsTab";
+import { ClaimsTab } from "./project/tabs/ClaimsTab";
+import { ParticipantsTab } from "./project/tabs/ParticipantsTab";
 
-import SubmissionDetailsModal from "./project/components/SubmissionDetailsModal";
-import { useProjectSubmissions } from "./project/hooks/useProjectSubmissions";
+import ClaimDetailsModal from "./project/components/ClaimDetailsModal";
+import { useProjectClaims } from "./project/hooks/useProjectClaims";
 
 import type {
   Project,
   ProjectCountry,
   ProjectPartnerOrg,
   CountryRef,
-  SubmissionSummary,
+  ClaimSummary,
+  ProjectParticipantSummary,
 } from "./project/types";
 
 /* ---------------------------------------------
@@ -54,22 +56,22 @@ export default function AdminProjectDetailPage() {
   /* -------------------------------------------
      Submissions
   ------------------------------------------- */
-  const { submissions: fetchedSubmissions, loading: loadingSubmissions } =
-    useProjectSubmissions(projectId ?? "");
+  const { claims: fetchedClaims, loading: loadingClaims } =
+    useProjectClaims(projectId ?? "");
 
-  const [submissions, setSubmissions] = useState<SubmissionSummary[]>([]);
-  const [submissionsRefreshKey, setSubmissionsRefreshKey] = useState(0);
-  const [preferredSubmissionTab, setPreferredSubmissionTab] = useState<
+  const [claims, setClaims] = useState<ClaimSummary[]>([]);
+  const [claimsRefreshKey, setClaimsRefreshKey] = useState(0);
+  const [preferredClaimTab, setPreferredClaimTab] = useState<
     "pending" | "approved" | "paid" | "rejected" | "abandoned" | null
   >(null);
 
-  function refreshSubmissionsTab() {
-    setSubmissionsRefreshKey((prev) => prev + 1);
+  function refreshClaimsTab() {
+    setClaimsRefreshKey((prev) => prev + 1);
   }
 
   useEffect(() => {
-    setSubmissions(fetchedSubmissions);
-  }, [fetchedSubmissions]);
+    setClaims(fetchedClaims);
+  }, [fetchedClaims]);
 
   /* -------------------------------------------
      Project meta
@@ -80,6 +82,9 @@ export default function AdminProjectDetailPage() {
   const [countries, setCountries] = useState<ProjectCountry[]>([]);
   const [partnerOrgs, setPartnerOrgs] = useState<ProjectPartnerOrg[]>([]);
   const [allCountries, setAllCountries] = useState<CountryRef[]>([]);
+  const [projectParticipants, setProjectParticipants] = useState<
+    ProjectParticipantSummary[]
+  >([]);
 
   const [newCountry, setNewCountry] = useState("");
 
@@ -101,8 +106,8 @@ export default function AdminProjectDetailPage() {
      Modal state
   ------------------------------------------- */
   const [subModalOpen, setSubModalOpen] = useState(false);
-  const [activeSubmission, setActiveSubmission] =
-    useState<SubmissionSummary | null>(null);
+  const [activeClaim, setActiveClaim] =
+    useState<ClaimSummary | null>(null);
 
   /* -------------------------------------------
      Load project & meta
@@ -126,10 +131,12 @@ export default function AdminProjectDetailPage() {
           created_at,
           organisation_id,
           project_type,
+          project_reference,
           start_date,
           end_date,
           internal_notes,
-          project_reference,
+          project_access_token,
+          participant_access_token,
           organisations:organisations!organisation_id (
             name,
             country_code
@@ -161,6 +168,33 @@ export default function AdminProjectDetailPage() {
         .select("code,name")
         .order("name", { ascending: true });
       setAllCountries(allC || []);
+
+      const { data: projectParticipantData } = await supabase
+        .from("project_participants")
+        .select(
+          `
+          id,
+          project_id,
+          resume_token,
+          full_name,
+          email,
+          residence_country,
+          food_preferences,
+          health_issues,
+          additional_information,
+          media_consent,
+          future_projects_consent,
+          agreement_accepted_at,
+          created_at,
+          updated_at
+        `
+        )
+        .eq("project_id", projectId)
+        .order("full_name", { ascending: true });
+
+      setProjectParticipants(
+        (projectParticipantData || []) as ProjectParticipantSummary[]
+      );
 
       const { data: subs } = await supabase
         .from("project_partner_submissions")
@@ -199,7 +233,7 @@ export default function AdminProjectDetailPage() {
         }
       });
 
-      fetchedSubmissions.forEach((s) => {
+      fetchedClaims.forEach((s) => {
         const org = (s.organisation_name ?? "").trim();
         if (!org) return;
 
@@ -216,7 +250,7 @@ export default function AdminProjectDetailPage() {
     }
 
     load();
-  }, [projectId, fetchedSubmissions]);
+  }, [projectId, fetchedClaims]);
 
   /* -------------------------------------------
      Helpers
@@ -234,8 +268,13 @@ export default function AdminProjectDetailPage() {
     return `${start} → ${end}`;
   }
 
+  function getParticipantOnboardingLink() {
+    if (!project?.participant_access_token) return null;
+    return `${window.location.origin}/participant/${project.participant_access_token}`;
+  }
+
   function getTabForClaimStatus(
-    claimStatus: SubmissionSummary["claim_status"]
+    claimStatus: ClaimSummary["claim_status"]
   ): "pending" | "approved" | "rejected" {
     if (claimStatus === "approved" || claimStatus === "adjusted") {
       return "approved";
@@ -276,34 +315,50 @@ export default function AdminProjectDetailPage() {
     setCountries((prev) => prev.filter((c) => c.id !== id));
   }
 
+  async function deleteProjectParticipant(participantId: string) {
+    const { error } = await supabase
+      .from("project_participants")
+      .delete()
+      .eq("id", participantId);
+
+    if (error) {
+      console.error("Failed to delete participant", error);
+      return;
+    }
+
+    setProjectParticipants((prev) =>
+      prev.filter((participant) => participant.id !== participantId)
+    );
+  }
+
   /* -------------------------------------------
      Modal handling
   ------------------------------------------- */
-  function openSubmissionModal(sub: SubmissionSummary) {
-    setActiveSubmission(sub);
+  function openClaimModal(sub: ClaimSummary) {
+    setActiveClaim(sub);
     setSubModalOpen(true);
   }
 
   /* -------------------------------------------
      Parent-level submission mutations
   ------------------------------------------- */
-  function handleDeleteSubmission(submissionId: string) {
-    setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+  function handleDeleteClaim(submissionId: string) {
+    setClaims((prev) => prev.filter((s) => s.id !== submissionId));
 
-    if (activeSubmission?.id === submissionId) {
+    if (activeClaim?.id === submissionId) {
       setSubModalOpen(false);
-      setActiveSubmission(null);
+      setActiveClaim(null);
     }
   }
 
   function handlePaymentUpdated(
     submissionId: string,
     payload: {
-      payment_status: SubmissionSummary["payment_status"];
+      payment_status: ClaimSummary["payment_status"];
       payment_paid_at: string | null;
     }
   ) {
-    setSubmissions((prev) =>
+    setClaims((prev) =>
       prev.map((s) => (s.id === submissionId ? { ...s, ...payload } : s))
     );
   }
@@ -315,31 +370,22 @@ export default function AdminProjectDetailPage() {
     submissionId: string,
     payload: {
       reviewed_at: string | null;
-      claim_status: SubmissionSummary["claim_status"];
+      claim_status: ClaimSummary["claim_status"];
       approved_amount_eur?: number | null;
     }
   ) {
-    const { error } = await supabase
-      .from("project_partner_submissions")
-      .update({
-        reviewed_at: payload.reviewed_at,
-        claim_status: payload.claim_status,
-        approved_amount_eur: payload.approved_amount_eur ?? null,
-      })
-      .eq("id", submissionId);
 
-    if (error) {
-      console.error("Review update failed", error);
-      return;
-    }
+    setPreferredClaimTab(getTabForClaimStatus(payload.claim_status));
 
-    setPreferredSubmissionTab(getTabForClaimStatus(payload.claim_status));
-
-    setSubmissions((prev) =>
+    setClaims((prev) =>
       prev.map((s) => (s.id === submissionId ? { ...s, ...payload } : s))
     );
 
-    setSubmissionsRefreshKey((prev) => prev + 1);
+    setActiveClaim((prev) =>
+      prev && prev.id === submissionId ? { ...prev, ...payload } : prev
+    );
+
+    setClaimsRefreshKey((prev) => prev + 1);
   }
 
   /* -------------------------------------------
@@ -378,7 +424,8 @@ export default function AdminProjectDetailPage() {
           <Tabs.Tab value="overview">Overview</Tabs.Tab>
           <Tabs.Tab value="countries">Countries</Tabs.Tab>
           <Tabs.Tab value="partners">Partner organisations</Tabs.Tab>
-          <Tabs.Tab value="submissions">Submissions</Tabs.Tab>
+          <Tabs.Tab value="submissions">Claims</Tabs.Tab>
+          <Tabs.Tab value="participants">Participants</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="overview" pt="md">
@@ -413,27 +460,36 @@ export default function AdminProjectDetailPage() {
         </Tabs.Panel>
 
         <Tabs.Panel value="submissions" pt="md">
-          <SubmissionsTab
+          <ClaimsTab
             project={project}
             countries={countries}
-            submissions={submissions}
-            loading={loadingSubmissions}
+            submissions={claims}
+            loading={loadingClaims}
             getCountryLabel={getCountryLabel}
-            onOpenSubmission={openSubmissionModal}
-            refreshKey={submissionsRefreshKey}
-            preferredTab={preferredSubmissionTab}
-            onPreferredTabApplied={() => setPreferredSubmissionTab(null)}
-            onRequireRefresh={refreshSubmissionsTab}
-            onDeleteSubmission={handleDeleteSubmission}
+            onOpenClaim={openClaimModal}
+            refreshKey={claimsRefreshKey}
+            preferredTab={preferredClaimTab}
+            onPreferredTabApplied={() => setPreferredClaimTab(null)}
+            onRequireRefresh={refreshClaimsTab}
+            onDeleteClaim={handleDeleteClaim}
             onPaymentUpdated={handlePaymentUpdated}
+          />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="participants" pt="md">
+          <ParticipantsTab
+            onboardingLink={getParticipantOnboardingLink()}
+            participants={projectParticipants}
+            getCountryLabel={getCountryLabel}
+            onDeleteParticipant={deleteProjectParticipant}
           />
         </Tabs.Panel>
       </Tabs>
 
-      <SubmissionDetailsModal
+      <ClaimDetailsModal
         opened={subModalOpen}
         onClose={() => setSubModalOpen(false)}
-        submission={activeSubmission}
+        claim={activeClaim}
         getCountryLabel={getCountryLabel}
         project={project}
         countries={countries}

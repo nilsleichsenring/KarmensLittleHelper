@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Group, Modal, Stack, Text } from "@mantine/core";
 
 import type {
-  SubmissionSummary,
+  ClaimSummary,
   Participant,
   Ticket,
   Project,
@@ -20,10 +20,7 @@ import DecisionStep from "./steps/DecisionStep";
 
 import { deriveParticipantTravelTypes } from "../../../../lib/travel/travel";
 import { calculateClaimSummary } from "./logic/reviewCalculations";
-import {
-  saveClaimDecision,
-  reopenSubmission,
-} from "./logic/reviewPersistence";
+import { saveClaimDecision, reopenClaim } from "./logic/reviewPersistence";
 
 /* ------------------------------------------------------------------ */
 /* Types */
@@ -48,7 +45,7 @@ type SuccessState = {
 };
 
 type Props = {
-  submission: SubmissionSummary;
+  claim: ClaimSummary;
   participants: Participant[];
   tickets: AdminTicket[];
 
@@ -61,8 +58,9 @@ type Props = {
     submissionId: string,
     payload: {
       reviewed_at: string | null;
-      claim_status: SubmissionSummary["claim_status"];
+      claim_status: ClaimSummary["claim_status"];
       approved_amount_eur?: number | null;
+      rejection_reason?: string | null;
     }
   ) => void;
 
@@ -88,12 +86,14 @@ function getDecisionBadge(status: DecisionStatus) {
         label: "Approved as claimed",
         color: "green" as const,
       };
+
     case "adjusted":
       return {
         icon: "🟡",
         label: "Adjusted & approved",
         color: "yellow" as const,
       };
+
     case "rejected":
       return {
         icon: "❌",
@@ -115,8 +115,8 @@ function areTicketReviewFieldsEqual(a: AdminTicket, b: AdminTicket) {
 /* Component */
 /* ------------------------------------------------------------------ */
 
-export default function AdminSubmissionReviewWizard({
-  submission,
+export default function AdminClaimReviewWizard({
+  claim,
   participants,
   tickets,
   project,
@@ -134,22 +134,22 @@ export default function AdminSubmissionReviewWizard({
   /* Claim status: base value + local override                      */
   /* -------------------------------------------------------------- */
 
-  const baseClaimStatus = submission.claim_status;
+  const baseClaimStatus = claim.claim_status;
 
   const [claimStatusOverride, setClaimStatusOverride] = useState<
-    SubmissionSummary["claim_status"] | null
+    ClaimSummary["claim_status"] | null
   >(null);
 
   const claimStatus = claimStatusOverride ?? baseClaimStatus;
 
-  const effectiveSubmission: SubmissionSummary = {
-    ...submission,
+  const effectiveClaim: ClaimSummary = {
+    ...claim,
     claim_status: claimStatus,
   };
 
   useEffect(() => {
     setClaimStatusOverride(null);
-  }, [baseClaimStatus]);
+  }, [claim.id]);
 
   const isClaimFinal =
     claimStatus === "approved" ||
@@ -198,7 +198,7 @@ export default function AdminSubmissionReviewWizard({
 
   useEffect(() => {
     setDistanceOverride(null);
-  }, [baseDistanceResult, submission.id]);
+  }, [baseDistanceResult, claim.id]);
 
   /* -------------------------------------------------------------- */
   /* Success popup state                                            */
@@ -267,6 +267,9 @@ export default function AdminSubmissionReviewWizard({
   const eligibleAmount = claimSummary.eligibleAmount;
   const computedAmountToApprove = claimSummary.amountToApprove;
 
+  const effectiveAmountToApprove =
+    claimStatus === "rejected" ? 0 : computedAmountToApprove;
+
   const decisionUsesDraftTickets = hasTicketChanges;
   void decisionUsesDraftTickets;
 
@@ -277,15 +280,19 @@ export default function AdminSubmissionReviewWizard({
   const balanceEligibleMinusApproved = useMemo(() => {
     if (eligibleAmount == null) return null;
 
-    const approved = successState?.approvedAmount ?? computedAmountToApprove;
+    const approved = successState?.approvedAmount ?? effectiveAmountToApprove;
     return eligibleAmount - approved;
-  }, [eligibleAmount, successState, computedAmountToApprove]);
+  }, [eligibleAmount, successState, effectiveAmountToApprove]);
 
   /* -------------------------------------------------------------- */
   /* Decision handler                                               */
   /* -------------------------------------------------------------- */
 
-  async function handleDecision(status: DecisionStatus, approvedAmount: number) {
+  async function handleDecision(
+    status: DecisionStatus,
+    approvedAmount: number,
+    rejectionReason?: string | null
+  ) {
     if (savingDecision) return;
 
     setSavingDecision(true);
@@ -294,9 +301,10 @@ export default function AdminSubmissionReviewWizard({
 
     try {
       result = await saveClaimDecision({
-        submissionId: submission.id,
+        submissionId: claim.id,
         status,
         approvedAmount,
+        rejectionReason,
       });
     } catch (error) {
       console.error("Decision update failed:", error);
@@ -306,10 +314,11 @@ export default function AdminSubmissionReviewWizard({
 
     setClaimStatusOverride(status);
 
-    onReviewComplete(submission.id, {
+    onReviewComplete(claim.id, {
       claim_status: result.claim_status,
       reviewed_at: result.reviewed_at,
       approved_amount_eur: result.approved_amount_eur,
+      rejection_reason: result.rejection_reason,
     });
 
     setSuccessState({ status, approvedAmount });
@@ -317,14 +326,14 @@ export default function AdminSubmissionReviewWizard({
   }
 
   /* -------------------------------------------------------------- */
-  /* Reopen submission                                              */
+  /* Reopen claim                                                   */
   /* -------------------------------------------------------------- */
 
-  async function handleReopenSubmission() {
+  async function handleReopenClaim() {
     let result;
 
     try {
-      result = await reopenSubmission(submission.id);
+      result = await reopenClaim(claim.id);
     } catch (error) {
       console.error("Reopen failed:", error);
       return;
@@ -332,10 +341,11 @@ export default function AdminSubmissionReviewWizard({
 
     setClaimStatusOverride("open");
 
-    onReviewComplete(submission.id, {
+    onReviewComplete(claim.id, {
       claim_status: result.claim_status,
       reviewed_at: result.reviewed_at,
       approved_amount_eur: result.approved_amount_eur,
+      rejection_reason: null,
     });
   }
 
@@ -348,7 +358,7 @@ export default function AdminSubmissionReviewWizard({
       case "context":
         return (
           <ContextStep
-            submission={effectiveSubmission}
+            submission={effectiveClaim}
             project={project}
             countries={countries}
             getCountryLabel={getCountryLabel}
@@ -359,7 +369,7 @@ export default function AdminSubmissionReviewWizard({
       case "distance":
         return (
           <DistanceStep
-            submission={submission}
+            submission={claim}
             isClaimFinal={isClaimFinal}
             onDistanceCalculated={setDistanceOverride}
           />
@@ -376,10 +386,7 @@ export default function AdminSubmissionReviewWizard({
 
       case "travelTypes":
         return (
-          <TravelTypesStep
-            participants={participants}
-            tickets={effectiveTickets}
-          />
+          <TravelTypesStep participants={participants} tickets={effectiveTickets} />
         );
 
       case "calculations":
@@ -407,18 +414,23 @@ export default function AdminSubmissionReviewWizard({
               claimedAmount={claimedAmount}
               eligibleAmount={eligibleAmount}
               ticketsApprovedAmount={ticketsApprovedAmount}
-              amountToApprove={computedAmountToApprove}
+              amountToApprove={effectiveAmountToApprove}
+              storedApprovedAmount={claim.approved_amount_eur}
               allTicketsReviewed={allTicketsReviewed}
               isClaimFinal={isClaimFinal}
               claimStatus={claimStatus}
+              paymentStatus={claim.payment_status}
+              paymentPaidAt={claim.payment_paid_at}
+              reviewedAt={claim.reviewed_at}
+              rejectionReason={claim.rejection_reason}
               onApproveAsClaimed={() =>
                 handleDecision("approved", computedAmountToApprove)
               }
               onAdjustAndApprove={() =>
                 handleDecision("adjusted", computedAmountToApprove)
               }
-              onReject={() => handleDecision("rejected", 0)}
-              onReopenSubmission={handleReopenSubmission}
+              onReject={(reason: string) => handleDecision("rejected", 0, reason)}
+              onReopenClaim={handleReopenClaim}
             />
           </>
         );
@@ -482,6 +494,16 @@ export default function AdminSubmissionReviewWizard({
                     {formatEur(successState.approvedAmount)}
                   </Text>
                 </Card>
+
+                {successState.status === "rejected" && claim.rejection_reason && (
+                  <Card withBorder radius="md" p="md" bg="red.0">
+                    <Text size="sm" c="dimmed">
+                      Rejection reason
+                    </Text>
+
+                    <Text size="sm">{claim.rejection_reason}</Text>
+                  </Card>
+                )}
 
                 {balanceEligibleMinusApproved != null && (
                   <Text size="sm" c="dimmed">

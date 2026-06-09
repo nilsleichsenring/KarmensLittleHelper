@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../../../lib/supabaseClient";
-import type { SubmissionSummary } from "../types";
+import type { ClaimSummary } from "../types";
 
-export function useProjectSubmissions(projectId: string | null) {
-  const [submissions, setSubmissions] = useState<SubmissionSummary[]>([]);
+export function useProjectClaims(projectId: string | null) {
+  const [claims, setClaims] = useState<ClaimSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -29,6 +29,7 @@ export function useProjectSubmissions(projectId: string | null) {
           submitted_at,
           reviewed_at,
           claim_status,
+          rejection_reason,
           approved_amount_eur,
           payment_status,
           payment_paid_at
@@ -38,12 +39,12 @@ export function useProjectSubmissions(projectId: string | null) {
 
       if (error) {
         console.error("Error loading submissions", error);
-        setSubmissions([]);
+        setClaims([]);
         setLoading(false);
         return;
       }
 
-      const result: SubmissionSummary[] = [];
+      const result: ClaimSummary[] = [];
 
       /* ---------------------------------------------------------
          2️⃣ Derive participant / ticket stats
@@ -78,6 +79,7 @@ export function useProjectSubmissions(projectId: string | null) {
 
           reviewed_at: s.reviewed_at,
           claim_status: s.claim_status,
+          rejection_reason: s.rejection_reason ?? null,
 
           /* ✅ FIX 4 – mapping */
           approved_amount_eur: s.approved_amount_eur ?? null,
@@ -91,7 +93,7 @@ export function useProjectSubmissions(projectId: string | null) {
         });
       }
 
-      setSubmissions(result);
+      setClaims(result);
       setLoading(false);
     }
 
@@ -101,7 +103,7 @@ export function useProjectSubmissions(projectId: string | null) {
   /* ---------------------------------------------------------
      🔁 Local patch after review
   --------------------------------------------------------- */
-  function updateSubmissionReview(
+  function updateClaimReview(
     submissionId: string,
     payload: {
       reviewed_at: string;
@@ -109,7 +111,7 @@ export function useProjectSubmissions(projectId: string | null) {
       approved_amount_eur: number;
     }
   ) {
-    setSubmissions((prev) =>
+    setClaims((prev) =>
       prev.map((s) =>
         s.id === submissionId ? { ...s, ...payload } : s
       )
@@ -119,14 +121,14 @@ export function useProjectSubmissions(projectId: string | null) {
   /* ---------------------------------------------------------
      🔁 Local patch after payment
   --------------------------------------------------------- */
-  function updateSubmissionPayment(
+  function updateClaimPayment(
     submissionId: string,
     payload: {
       payment_status: "unpaid" | "paid";
       payment_paid_at: string | null;
     }
   ) {
-    setSubmissions((prev) =>
+    setClaims((prev) =>
       prev.map((s) =>
         s.id === submissionId ? { ...s, ...payload } : s
       )
@@ -134,9 +136,9 @@ export function useProjectSubmissions(projectId: string | null) {
   }
 
   return {
-    submissions,
+    claims,
     loading,
-    updateSubmissionReview,
-    updateSubmissionPayment,
+    updateClaimReview,
+    updateClaimPayment,
   };
 }

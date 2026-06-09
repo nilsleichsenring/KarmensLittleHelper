@@ -9,7 +9,6 @@ import AdminProjectDetailPage from "./pages/admin/AdminProjectDetailPage";
 import { AdminProjectCountriesPage } from "./pages/admin/AdminProjectCountriesPage";
 import { AdminLayout } from "./pages/admin/AdminLayout";
 
-
 /* Partner layout */
 import PartnerLayout from "./pages/partner/PartnerLayout";
 
@@ -24,10 +23,13 @@ import PartnerTicketsPage from "./pages/partner/PartnerTicketsPage";
 import PartnerSubmitPage from "./pages/partner/PartnerSubmitPage";
 import PartnerDonePage from "./pages/partner/PartnerDonePage";
 
+/* Participant pages */
+import ParticipantOnboardingPage from "./pages/participant/ParticipantOnboardingPage";
+
 export function AppRoutes() {
   return (
     <Routes>
-      /* Admin */
+      {/* Admin */}
       <Route path="/" element={<OrganisationSelectPage />} />
 
       <Route path="/admin" element={<AdminLayout />}>
@@ -43,10 +45,7 @@ export function AppRoutes() {
       </Route>
 
       {/* Partner – Einstieg */}
-      <Route
-        path="/p/:projectToken"
-        element={<PartnerOnboardingPage />}
-      />
+      <Route path="/p/:projectToken" element={<PartnerOnboardingPage />} />
 
       {/* Partner – aktiver Flow (MIT Layout) */}
       <Route path="/p/:projectToken" element={<PartnerLayout />}>
@@ -60,9 +59,12 @@ export function AppRoutes() {
       </Route>
 
       {/* Partner – Abschluss (OHNE Layout) */}
+      <Route path="/p/:projectToken/done" element={<PartnerDonePage />} />
+
+      {/* Participant onboarding */}
       <Route
-        path="/p/:projectToken/done"
-        element={<PartnerDonePage />}
+        path="/participant/:projectToken"
+        element={<ParticipantOnboardingPage />}
       />
 
       {/* Fallback */}

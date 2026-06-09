@@ -1,4 +1,4 @@
-import type { ProjectPartnerOrg, SubmissionSummary } from "../../types";
+import type { ProjectPartnerOrg, ClaimSummary } from "../../types";
 
 export type SubmissionTabKey =
   | "pending"
@@ -8,7 +8,7 @@ export type SubmissionTabKey =
   | "abandoned";
 
 export function classifySubmission(
-  submission: SubmissionSummary,
+  submission: ClaimSummary,
   partnerOrg: ProjectPartnerOrg | null
 ): SubmissionTabKey {
   if (!submission.submitted) return "abandoned";

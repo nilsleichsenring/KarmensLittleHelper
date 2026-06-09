@@ -1,11 +1,12 @@
 // src/lib/pdf/pdfEngine.ts
 import {
   PDFDocument,
-  StandardFonts,
   rgb,
   type PDFPage,
   type PDFFont,
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import robotoFont from "../../assets/fonts/Roboto-Regular.ttf?url";
 import { supabase } from "../supabaseClient";
 
 // -----------------------------------------------------
@@ -56,8 +57,18 @@ export class PdfEngine {
   // -----------------------------------------------------
   async init() {
     this.pdf = await PDFDocument.create();
-    this.fontSans = await this.pdf.embedFont(StandardFonts.Helvetica);
-    this.fontMono = await this.pdf.embedFont(StandardFonts.Courier);
+
+    this.pdf.registerFontkit(fontkit);
+
+    const fontBytes = await fetch(robotoFont).then((res) =>
+      res.arrayBuffer()
+    );
+
+    const customFont = await this.pdf.embedFont(fontBytes);
+
+    this.fontSans = customFont;
+    this.fontMono = customFont;
+
     this.addPage();
   }
 

@@ -5,19 +5,23 @@ export async function saveClaimDecision(args: {
   submissionId: string;
   status: "approved" | "adjusted" | "rejected";
   approvedAmount: number;
+  rejectionReason?: string | null;
 }) {
-  const { submissionId, status, approvedAmount } = args;
+  const { submissionId, status, approvedAmount, rejectionReason } = args;
 
   const now = new Date().toISOString();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("project_partner_submissions")
-    .update({
-      claim_status: status,
-      reviewed_at: now,
-      approved_amount_eur: approvedAmount,
-    })
-    .eq("id", submissionId);
+      .update({
+        claim_status: status,
+        reviewed_at: now,
+        approved_amount_eur: approvedAmount,
+        rejection_reason: status === "rejected" ? rejectionReason ?? null : null,
+      })
+    .eq("id", submissionId)
+    .select("id, claim_status, reviewed_at, approved_amount_eur, rejection_reason")
+    .single();
 
   if (error) {
     throw error;
@@ -25,23 +29,35 @@ export async function saveClaimDecision(args: {
 
   return {
     reviewed_at: now,
-    claim_status: status,
-    approved_amount_eur: approvedAmount,
+    claim_status: data.claim_status as "approved" | "adjusted" | "rejected",
+    approved_amount_eur: data.approved_amount_eur as number | null,
+    rejection_reason: data.rejection_reason as string | null,
   };
 }
 
-export async function reopenSubmission(submissionId: string) {
-  const { error } = await supabase
+export async function reopenClaim(submissionId: string) {
+  const { data, error } = await supabase
     .from("project_partner_submissions")
-    .update({
-      claim_status: "open",
-      reviewed_at: null,
-      approved_amount_eur: null,
-    })
-    .eq("id", submissionId);
+      .update({
+        claim_status: "open",
+        reviewed_at: null,
+        approved_amount_eur: null,
+        rejection_reason: null,
+
+        payment_status: "unpaid",
+        payment_paid_at: null,
+      })
+    .eq("id", submissionId)
+    .eq("payment_status", "unpaid")
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new Error("Paid claims cannot be reopened.");
   }
 
   return {
@@ -110,19 +126,29 @@ export async function saveDistance(args: {
   };
 }
 
-export async function markSubmissionPaid(submissionId: string) {
+export async function markClaimPaid(submissionId: string) {
   const now = new Date().toISOString();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("project_partner_submissions")
     .update({
       payment_status: "paid",
       payment_paid_at: now,
     })
-    .eq("id", submissionId);
+    .eq("id", submissionId)
+    .in("claim_status", ["approved", "adjusted"])
+    .gt("approved_amount_eur", 0)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new Error(
+      "Only approved claims with a positive approved amount can be marked as paid."
+    );
   }
 
   return {
@@ -131,17 +157,24 @@ export async function markSubmissionPaid(submissionId: string) {
   };
 }
 
-export async function undoSubmissionPayment(submissionId: string) {
-  const { error } = await supabase
+export async function undoClaimPayment(submissionId: string) {
+  const { data, error } = await supabase
     .from("project_partner_submissions")
     .update({
       payment_status: "unpaid",
       payment_paid_at: null,
     })
-    .eq("id", submissionId);
+    .eq("id", submissionId)
+    .eq("payment_status", "paid")
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new Error("Only paid claims can undo the payment status.");
   }
 
   return {
@@ -150,7 +183,7 @@ export async function undoSubmissionPayment(submissionId: string) {
   };
 }
 
-export async function deleteSubmissionCascade(submissionId: string) {
+export async function deleteClaimCascade(submissionId: string) {
   const { data: ticketRows, error: ticketLoadErr } = await supabase
     .from("tickets")
     .select("id")

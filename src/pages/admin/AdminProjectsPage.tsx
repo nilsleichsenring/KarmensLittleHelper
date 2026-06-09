@@ -5,6 +5,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Card,
   Container,
   Divider,
@@ -21,6 +22,7 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 
 import { CountryFlag } from "../../components/CountryFlag";
+import { AGREEMENT_SECTION_DEFINITIONS } from "../../lib/participantAgreement/definitions";
 
 type Project = {
   id: string;
@@ -87,8 +89,14 @@ export function AdminProjectsPage() {
   const [countries, setCountries] = useState<CountryRow[]>([
     { id: 1, countryCode: "" },
   ]);
+
+  const [selectedAgreementSections, setSelectedAgreementSections] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const optionalSections = AGREEMENT_SECTION_DEFINITIONS.filter(
+    (section) => !section.required
+  );
 
   // LOAD PROJECTS
   useEffect(() => {
@@ -176,6 +184,7 @@ export function AdminProjectsPage() {
     setEndDate("");
     setNotes("");
     setCountries([{ id: 1, countryCode: "" }]);
+    setSelectedAgreementSections([]);
     setFormError(null);
   }
 
@@ -222,19 +231,25 @@ export function AdminProjectsPage() {
 
     setSaving(true);
 
-    const { data: projectData, error: pErr } = await supabase
-      .from("projects")
-      .insert({
-        name,
-        organisation_id,
-        project_type: projectType,
-        project_reference: referenceNumber, // NEW FIELD
-        start_date: startDate || null,
-        end_date: endDate || null,
-        internal_notes: notes || null,
-      })
-      .select()
-      .single();
+  const { data: projectData, error: pErr } = await supabase
+    .from("projects")
+    .insert({
+      name,
+      organisation_id,
+      project_type: projectType,
+      project_reference: referenceNumber, // NEW FIELD
+      start_date: startDate || null,
+      end_date: endDate || null,
+      internal_notes: notes || null,
+      participant_access_token: crypto.randomUUID(),
+      agreement_config_json: {
+        version: 1,
+        default_language: "en",
+        enabled_section_ids: selectedAgreementSections,
+      },
+    })
+    .select()
+    .single();
 
     if (pErr || !projectData) {
       console.error(pErr);
@@ -473,6 +488,46 @@ export function AdminProjectsPage() {
                 onChange={(e) => setNotes(e.currentTarget.value)}
                 minRows={3}
               />
+            </Stack>
+
+            {/* Agreement configuration */}
+            <Stack gap="xs">
+              <Text size="sm" fw={600}>
+                Agreement sections
+              </Text>
+
+              <Text size="xs" c="dimmed">
+                Select which optional sections should be included in the participant agreement.
+              </Text>
+
+              <Stack gap={6}>
+                {optionalSections.map((section) => (
+                <Checkbox
+                  key={section.id}
+                  label={
+                    <Stack gap={2}>
+                      <Text size="sm">{section.contentByLanguage.en.title}</Text>
+
+                      {section.contentByLanguage.en.paragraphs?.[0] && (
+                        <Text size="xs" c="dimmed">
+                          {section.contentByLanguage.en.paragraphs[0]}
+                        </Text>
+                      )}
+                    </Stack>
+                  }
+                  checked={selectedAgreementSections.includes(section.id)}
+                  onChange={(e) => {
+                    if (e.currentTarget.checked) {
+                      setSelectedAgreementSections((prev) => [...prev, section.id]);
+                    } else {
+                      setSelectedAgreementSections((prev) =>
+                        prev.filter((id) => id !== section.id)
+                      );
+                    }
+                  }}
+                />
+                ))}
+              </Stack>
             </Stack>
 
             {formError && <Text c="red">{formError}</Text>}

@@ -1,4 +1,4 @@
-// src/pages/admin/project/tabs/SubmissionsTab.tsx
+// src/pages/admin/project/tabs/ClaimsTab.tsx
 
 import {
   Alert,
@@ -18,11 +18,9 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../../lib/supabaseClient";
 
 import type {
-  SubmissionSummary,
+  ClaimSummary,
   Project,
   ProjectCountry,
-  Participant,
-  Ticket,
   ProjectPartnerOrg,
 } from "../types";
 
@@ -31,13 +29,23 @@ import { HelpTooltip } from "../../../../components/HelpTooltip";
 
 import { generatePdf } from "../../../../lib/pdf/pdfEngine";
 import { renderAdminSubmission } from "../../../../lib/pdf/renderers/adminSubmission";
+import { deriveParticipantTravelTypes } from "../../../../lib/travel/travel";
 import { classifySubmission } from "../submissionReview/logic/reviewClassification";
-import { getSubmissionBadges } from "../submissionReview/logic/reviewBadges";
+import { getClaimBadges } from "../submissionReview/logic/reviewBadges";
 import {
-  markSubmissionPaid,
-  undoSubmissionPayment,
-  deleteSubmissionCascade,
+  markClaimPaid,
+  undoClaimPayment,
+  deleteClaimCascade,
 } from "../submissionReview/logic/reviewPersistence";
+
+import {
+  canMarkClaimPaid,
+  canUndoClaimPayment,
+  canDeleteClaim,
+  isApprovedOrAdjustedClaim,
+} from "../../../../lib/claims/claimStateMachine";
+
+import { calculateClaimSummary } from "../submissionReview/logic/reviewCalculations";
 
 /* =========================================================
    HELPERS (Formatting)
@@ -60,7 +68,6 @@ type TabKey =
   | "abandoned"
   | "all";
 
-
 /* =========================================================
    COMPONENT
 ========================================================= */
@@ -68,35 +75,35 @@ type TabKey =
 type Props = {
   project: Project;
   countries: ProjectCountry[];
-  submissions: SubmissionSummary[];
+  submissions: ClaimSummary[];
   loading: boolean;
   getCountryLabel: (code: string | null) => string;
-  onOpenSubmission: (submission: SubmissionSummary) => void;
+  onOpenClaim: (claim: ClaimSummary) => void;
   refreshKey: number;
   preferredTab?: Exclude<TabKey, "all"> | null;
   onPreferredTabApplied?: () => void;
   onRequireRefresh: () => void;
-  onDeleteSubmission: (submissionId: string) => void;
+  onDeleteClaim: (submissionId: string) => void;
   onPaymentUpdated: (
     submissionId: string,
     payload: {
-      payment_status: SubmissionSummary["payment_status"];
+      payment_status: ClaimSummary["payment_status"];
       payment_paid_at: string | null;
     }
   ) => void;
 };
 
-export function SubmissionsTab({
+export function ClaimsTab({
   project,
   submissions,
   loading,
   getCountryLabel,
-  onOpenSubmission,
+  onOpenClaim,
   refreshKey,
   preferredTab,
   onPreferredTabApplied,
   onRequireRefresh,
-  onDeleteSubmission,
+  onDeleteClaim,
   onPaymentUpdated,
 }: Props) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -106,15 +113,10 @@ export function SubmissionsTab({
   const [activeTab, setActiveTab] = useState<TabKey>("pending");
 
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<SubmissionSummary | null>(
-    null
-  );
+  const [deleteTarget, setDeleteTarget] = useState<ClaimSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  /* ---------------------------------------------------------
-     Sync preferred tab from parent
-  --------------------------------------------------------- */
   useEffect(() => {
     if (preferredTab) {
       setActiveTab(preferredTab);
@@ -122,9 +124,6 @@ export function SubmissionsTab({
     }
   }, [preferredTab, onPreferredTabApplied]);
 
-  /* ---------------------------------------------------------
-     Load Partner Organisations
-  --------------------------------------------------------- */
   useEffect(() => {
     let active = true;
 
@@ -150,11 +149,8 @@ export function SubmissionsTab({
     };
   }, [project.id, refreshKey]);
 
-  /* ---------------------------------------------------------
-     Helpers
-  --------------------------------------------------------- */
-  function getPartnerOrgForSubmission(
-    submission: SubmissionSummary
+  function getPartnerOrgForClaim(
+    submission: ClaimSummary
   ): ProjectPartnerOrg | null {
     return (
       partnerOrgs.find(
@@ -165,48 +161,132 @@ export function SubmissionsTab({
     );
   }
 
-  /* ---------------------------------------------------------
-     PDF DOWNLOAD
-  --------------------------------------------------------- */
-  async function handleDownload(submission: SubmissionSummary) {
+  async function handleDownload(claim: ClaimSummary) {
     try {
-      setDownloadingId(submission.id);
+      setDownloadingId(claim.id);
 
       const { data: parts } = await supabase
         .from("participants")
-        .select("id, full_name, is_green_travel")
-        .eq("project_partner_submission_id", submission.id);
+        .select("id, full_name")
+        .eq("project_partner_submission_id", claim.id);
 
       const { data: tix } = await supabase
         .from("tickets")
-        .select("id, from_location, to_location, amount_eur")
-        .eq("project_partner_submission_id", submission.id);
+        .select(
+          `
+          id,
+          from_location,
+          to_location,
+          amount_eur,
+          file_url,
+          travel_mode,
+          review_decision,
+          reviewed_at,
+          ticket_participants (
+            participant: participants (
+              id,
+              full_name
+            )
+          )
+        `
+        )
+        .eq("project_partner_submission_id", claim.id);
 
-      const partnerOrg = getPartnerOrgForSubmission(submission);
+      const partnerOrg = getPartnerOrgForClaim(claim);
+
+      const rawParticipants = (parts || []) as {
+        id: string;
+        full_name: string;
+      }[];
+
+      const pdfTickets = (tix || []).map((ticket: any) => ({
+        id: ticket.id,
+        from_location: ticket.from_location,
+        to_location: ticket.to_location,
+        amount_eur: Number(ticket.amount_eur ?? 0),
+        file_url: ticket.file_url ?? null,
+        travel_mode: ticket.travel_mode ?? null,
+        review_decision: ticket.review_decision ?? null,
+        reviewed_at: ticket.reviewed_at ?? null,
+        assigned_participants:
+          ticket.ticket_participants
+            ?.map((row: any) => row.participant?.full_name)
+            .filter(Boolean) ?? [],
+      }));
+
+      const approvedPdfTickets = pdfTickets.filter(
+        (ticket) => ticket.review_decision === "approved"
+      );
+
+      const ticketParticipants = approvedPdfTickets.flatMap((ticket) =>
+        (tix || [])
+          .find((rawTicket: any) => rawTicket.id === ticket.id)
+          ?.ticket_participants?.map((row: any) => ({
+            ticket_id: ticket.id,
+            participant_id: row.participant?.id,
+          }))
+          .filter((row: any) => Boolean(row.participant_id)) ?? []
+      );
+
+      const travelTypesByParticipant = deriveParticipantTravelTypes({
+        participants: rawParticipants,
+        tickets: approvedPdfTickets,
+        ticketParticipants,
+      });
+
+      const pdfParticipants = rawParticipants.map((participant) => ({
+        id: participant.id,
+        full_name: participant.full_name,
+        travel_type: travelTypesByParticipant[participant.id],
+      }));
+
+        const pdfSummary = calculateClaimSummary({
+          participants: rawParticipants,
+          tickets: pdfTickets.map((ticket) => ({
+          ...ticket,
+          project_partner_submission_id: claim.id,
+          approved: ticket.review_decision === "approved",
+          assigned_participants:
+            (tix || [])
+              .find((rawTicket: any) => rawTicket.id === ticket.id)
+              ?.ticket_participants?.map((row: any) => ({
+                id: row.participant?.id,
+                full_name: row.participant?.full_name,
+              }))
+              .filter((participant: any) => participant.id) ?? [],
+        })),
+        participantTravelTypes: travelTypesByParticipant,
+        distanceResult: partnerOrg
+          ? {
+              distanceKm: partnerOrg.distance_km ?? 0,
+              distanceBand: partnerOrg.distance_band ?? 0,
+              standardRate: partnerOrg.rate_standard_eur ?? 0,
+              greenRate: partnerOrg.rate_green_eur ?? 0,
+            }
+          : null,
+      });
 
       await generatePdf(
         renderAdminSubmission,
         {
-          submission,
-          participants: (parts || []) as Participant[],
-          tickets: (tix || []) as Ticket[],
+          submission: claim,
+          participants: pdfParticipants,
+          tickets: pdfTickets,
+          summary: pdfSummary,
           project,
           rates: {
             standard: partnerOrg?.rate_standard_eur ?? 0,
             green: partnerOrg?.rate_green_eur ?? 0,
           },
         },
-        `reimbursement_${submission.organisation_name.replace(/\s+/g, "_")}.pdf`
+        `reimbursement_${claim.organisation_name.replace(/\s+/g, "_")}.pdf`
       );
     } finally {
       setDownloadingId(null);
     }
   }
 
-  /* ---------------------------------------------------------
-     Delete
-  --------------------------------------------------------- */
-  function openDeleteModal(sub: SubmissionSummary) {
+  function openDeleteModal(sub: ClaimSummary) {
     setDeleteError(null);
     setDeleteTarget(sub);
     setDeleteOpen(true);
@@ -219,8 +299,8 @@ export function SubmissionsTab({
     setDeleteError(null);
 
     try {
-      await deleteSubmissionCascade(deleteTarget.id);
-      onDeleteSubmission(deleteTarget.id);
+      await deleteClaimCascade(deleteTarget.id);
+      onDeleteClaim(deleteTarget.id);
       setDeleteOpen(false);
       setDeleteTarget(null);
       setActiveTab("abandoned");
@@ -232,11 +312,8 @@ export function SubmissionsTab({
     }
   }
 
-  /* ---------------------------------------------------------
-     Derived tab lists
-  --------------------------------------------------------- */
   const grouped = useMemo(() => {
-    const result: Record<Exclude<TabKey, "all">, SubmissionSummary[]> = {
+    const result: Record<Exclude<TabKey, "all">, ClaimSummary[]> = {
       pending: [],
       approved: [],
       paid: [],
@@ -245,12 +322,12 @@ export function SubmissionsTab({
     };
 
     for (const s of submissions) {
-      const partnerOrg = getPartnerOrgForSubmission(s);
+      const partnerOrg = getPartnerOrgForClaim(s);
       const key = classifySubmission(s, partnerOrg);
       result[key].push(s);
     }
 
-    const allOrdered: SubmissionSummary[] = [
+    const allOrdered: ClaimSummary[] = [
       ...result.pending,
       ...result.approved,
       ...result.paid,
@@ -261,12 +338,9 @@ export function SubmissionsTab({
     return {
       ...result,
       all: allOrdered,
-    } as Record<TabKey, SubmissionSummary[]>;
+    } as Record<TabKey, ClaimSummary[]>;
   }, [submissions, partnerOrgs]);
 
-  /* ---------------------------------------------------------
-     Loading state
-  --------------------------------------------------------- */
   if (loading || loadingOrgs) {
     return (
       <Group justify="center" mt="xl">
@@ -275,29 +349,21 @@ export function SubmissionsTab({
     );
   }
 
-  /* ---------------------------------------------------------
-     Reusable card renderer
-  --------------------------------------------------------- */
-  function SubmissionCard({ s }: { s: SubmissionSummary }) {
-    const partnerOrg = getPartnerOrgForSubmission(s);
+  function ClaimCard({ s }: { s: ClaimSummary }) {
+    const partnerOrg = getPartnerOrgForClaim(s);
     const tabKey = classifySubmission(s, partnerOrg);
 
     const showDistanceBadge = tabKey === "pending";
-    const badges = getSubmissionBadges(s, partnerOrg, {
+    const badges = getClaimBadges(s, partnerOrg, {
       showDistanceBadge,
     });
 
     const canDownloadPdf = tabKey !== "abandoned";
-    const canDeleteByRules = tabKey === "abandoned";
-
-    const canMarkPaidBase =
-      (tabKey === "approved" || tabKey === "paid") &&
-      (s.claim_status === "approved" || s.claim_status === "adjusted") &&
-      s.payment_status !== "paid";
-
-    const canUndoPaid =
-      (tabKey === "approved" || tabKey === "paid") &&
-      s.payment_status === "paid";
+    const canDeleteByRules = canDeleteClaim({
+      submitted: s.submitted,
+      claim_status: s.claim_status,
+      payment_status: s.payment_status,
+    });
 
     const approvedAmount = s.approved_amount_eur ?? null;
     const hasApprovedAmount =
@@ -305,8 +371,16 @@ export function SubmissionsTab({
     const isApprovedAmountPositive =
       hasApprovedAmount && Number(approvedAmount) > 0;
 
-    const canMarkPaid =
-      canMarkPaidBase && hasApprovedAmount && isApprovedAmountPositive;
+    const canMarkPaid = canMarkClaimPaid(s);
+
+    const canMarkPaidBase =
+      (tabKey === "approved" || tabKey === "paid") &&
+      isApprovedOrAdjustedClaim(s) &&
+      s.payment_status !== "paid";
+
+    const canUndoPaid =
+      (tabKey === "approved" || tabKey === "paid") &&
+      canUndoClaimPayment(s);
 
     const claimed = Number(s.totalEur ?? 0);
     const diff = hasApprovedAmount ? claimed - Number(approvedAmount) : null;
@@ -320,8 +394,8 @@ export function SubmissionsTab({
     const paymentTooltipLabel = !hasApprovedAmount
       ? "Cannot mark as paid yet: no approved amount stored. Please complete the decision step first."
       : !isApprovedAmountPositive
-      ? "Cannot mark as paid: approved amount is 0.00 €. If this is correct, payment is not required."
-      : "Ready for payment based on the stored approved amount.";
+        ? "Cannot mark as paid: approved amount is 0.00 €. If this is correct, payment is not required."
+        : "Ready for payment based on the stored approved amount.";
 
     return (
       <Card
@@ -339,6 +413,7 @@ export function SubmissionsTab({
               <Text fw={600} size="lg">
                 {s.organisation_name}
               </Text>
+
               <Group gap={6}>
                 <CountryFlag code={s.country_code} size={18} />
                 <Text size="sm" c="dimmed">
@@ -395,8 +470,8 @@ export function SubmissionsTab({
                   showOverclaimed
                     ? "yellow"
                     : showUnderclaimed
-                    ? "blue"
-                    : "gray"
+                      ? "blue"
+                      : "gray"
                 }
                 variant="light"
               >
@@ -414,11 +489,7 @@ export function SubmissionsTab({
           <Divider />
 
           <Group justify="flex-end" gap="sm">
-            <Button
-              size="xs"
-              variant="light"
-              onClick={() => onOpenSubmission(s)}
-            >
+            <Button size="xs" variant="light" onClick={() => onOpenClaim(s)}>
               View details
             </Button>
 
@@ -442,12 +513,12 @@ export function SubmissionsTab({
                   color="green"
                   disabled={!canMarkPaid}
                   onClick={async () => {
-                    if (!hasApprovedAmount || !isApprovedAmountPositive) return;
+                    if (!canMarkPaid) return;
 
                     let result;
 
                     try {
-                      result = await markSubmissionPaid(s.id);
+                      result = await markClaimPaid(s.id);
                     } catch (error) {
                       console.error(error);
                       return;
@@ -475,7 +546,7 @@ export function SubmissionsTab({
                   let result;
 
                   try {
-                    result = await undoSubmissionPayment(s.id);
+                    result = await undoClaimPayment(s.id);
                   } catch (error) {
                     console.error(error);
                     return;
@@ -507,11 +578,11 @@ export function SubmissionsTab({
     );
   }
 
-  function RenderTabList({ items }: { items: SubmissionSummary[] }) {
+  function RenderTabList({ items }: { items: ClaimSummary[] }) {
     if (items.length === 0) {
       return (
         <Alert color="gray" variant="light" maw={700} w="100%">
-          No submissions in this category.
+          No claims in this category.
         </Alert>
       );
     }
@@ -519,7 +590,7 @@ export function SubmissionsTab({
     return (
       <Stack gap="md" align="center" w="100%">
         {items.map((s) => (
-          <SubmissionCard key={s.id} s={s} />
+          <ClaimCard key={s.id} s={s} />
         ))}
       </Stack>
     );
@@ -536,7 +607,7 @@ export function SubmissionsTab({
             setDeleteError(null);
           }
         }}
-        title="Delete submission?"
+        title="Delete claim?"
         centered
       >
         <Stack gap="sm">
@@ -551,7 +622,7 @@ export function SubmissionsTab({
                 {deleteTarget.organisation_name}
               </Text>
               <Text size="sm" c="dimmed">
-                Submission ID: {deleteTarget.id}
+                Claim ID: {deleteTarget.id}
               </Text>
             </Alert>
           )}
@@ -571,6 +642,7 @@ export function SubmissionsTab({
             >
               Cancel
             </Button>
+
             <Button color="red" loading={deleting} onClick={confirmDelete}>
               Delete
             </Button>
@@ -580,7 +652,7 @@ export function SubmissionsTab({
 
       <Stack gap="xl" align="center">
         <Stack gap="xs" maw={700} w="100%">
-          <Title order={3}>Project submissions</Title>
+          <Title order={3}>Project claims</Title>
           <Text size="sm" c="dimmed">
             {project.name}
           </Text>

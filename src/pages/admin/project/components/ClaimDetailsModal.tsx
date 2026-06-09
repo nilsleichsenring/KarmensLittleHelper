@@ -1,15 +1,15 @@
 import { Modal, Text } from "@mantine/core";
 
 import type {
-  SubmissionSummary,
+  ClaimSummary,
   Ticket,
   Project,
   ProjectCountry,
 } from "../types";
 
 import AdminReviewLayout from "../submissionReview/AdminReviewLayout";
-import AdminSubmissionReviewWizard from "../submissionReview/AdminSubmissionReviewWizard";
-import { useSubmissionReview } from "../submissionReview/hooks/useSubmissionReview";
+import AdminClaimReviewWizard from "../submissionReview/AdminClaimReviewWizard";
+import { useClaimReview } from "../submissionReview/hooks/useClaimReview";
 
 /* ------------------------------------------------------------------ */
 /* Types */
@@ -26,7 +26,7 @@ type Props = {
   opened: boolean;
   onClose: () => void;
 
-  submission: SubmissionSummary | null;
+  claim: ClaimSummary | null;
 
   getCountryLabel: (code: string | null) => string;
 
@@ -37,7 +37,7 @@ type Props = {
     submissionId: string,
     payload: {
       reviewed_at: string | null;
-      claim_status: SubmissionSummary["claim_status"];
+      claim_status: ClaimSummary["claim_status"];
       approved_amount_eur?: number | null;
     }
   ) => void;
@@ -47,21 +47,21 @@ type Props = {
 /* Component */
 /* ------------------------------------------------------------------ */
 
-export default function SubmissionDetailsModal({
+export default function ClaimDetailsModal({
   opened,
   onClose,
-  submission,
+  claim,
   project,
   countries,
   getCountryLabel,
   onReviewComplete,
 }: Props) {
-  const review = useSubmissionReview(submission?.id ?? null, opened);
-  const hookSubmission = review.submission;
+  const review = useClaimReview(claim?.id ?? null, opened);
+  const hookClaim = review.submission;
 
-  if (!submission || review.loading || !hookSubmission) {
+  if (!claim || review.loading || !hookClaim) {
     return (
-      <Modal opened={opened} onClose={onClose} centered title="Submission">
+      <Modal opened={opened} onClose={onClose} centered title="Claim">
         <Text c="dimmed">Loading…</Text>
       </Modal>
     );
@@ -69,7 +69,7 @@ export default function SubmissionDetailsModal({
 
   if (review.error) {
     return (
-      <Modal opened={opened} onClose={onClose} centered title="Submission">
+      <Modal opened={opened} onClose={onClose} centered title="Claim">
         <Text c="red">{review.error}</Text>
       </Modal>
     );
@@ -82,7 +82,7 @@ export default function SubmissionDetailsModal({
     <Modal
       opened={opened}
       onClose={onClose}
-      title={`Submission – ${hookSubmission.organisation_name}`}
+      title={`Claim – ${hookClaim.organisation_name}`}
       size="xl"
       centered
     >
@@ -91,14 +91,17 @@ export default function SubmissionDetailsModal({
         allTicketsReviewed={review.allTicketsReviewed}
         isClaimFinal={review.isClaimFinal}
       >
-        <AdminSubmissionReviewWizard
-          submission={hookSubmission}
+        <AdminClaimReviewWizard
+          claim={hookClaim}
           participants={reviewParticipants}
           tickets={reviewTickets}
           project={project}
           countries={countries}
           getCountryLabel={getCountryLabel}
-          onReviewComplete={onReviewComplete}
+          onReviewComplete={(submissionId, payload) => {
+            review.updateClaim(payload);
+            onReviewComplete(submissionId, payload);
+          }}
           onClose={onClose}
           initialDistanceResult={review.initialDistanceResult}
         />

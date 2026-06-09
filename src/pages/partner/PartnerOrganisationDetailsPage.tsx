@@ -1,4 +1,4 @@
-// src/pages/partner/PartnerOrganisationPage.tsx
+// src/pages/partner/PartnerOrganisationDetailsPage.tsx
 
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -17,21 +17,28 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import { countryCodeToName } from "../../lib/flags";
 
-const STORAGE_PREFIX = "partner_org_";
-
-/** Flag image helper (FILES ARE UPPERCASE: /flags/DE.svg) */
 function flagUrl(code: string | null) {
   if (!code) return undefined;
   return `/flags/${code.toUpperCase()}.svg`;
 }
 
-export default function PartnerOrganisationPage() {
-  const { projectToken } = useParams<{ projectToken: string }>();
+type PartnerOrg = {
+  id: string;
+  country_code: string | null;
+  organisation_name: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_postal_code: string | null;
+  address_city: string | null;
+  address_region: string | null;
+};
+
+export default function PartnerOrganisationDetailsPage() {
+  const { partnerResumeToken } = useParams<{ partnerResumeToken: string }>();
   const navigate = useNavigate();
 
-  const [partnerOrgId, setPartnerOrgId] = useState<string | null>(null);
+  const [partnerOrg, setPartnerOrg] = useState<PartnerOrg | null>(null);
   const [countryCode, setCountryCode] = useState<string | null>(null);
-
   const [organisationName, setOrganisationName] = useState("");
   const [addressLine1, setAddressLine1] = useState("");
   const [addressLine2, setAddressLine2] = useState("");
@@ -43,31 +50,19 @@ export default function PartnerOrganisationPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* --------------------------------------------------
-     Load partner organisation data
-  -------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      if (!projectToken) {
-        setError("Invalid access link.");
+      if (!partnerResumeToken) {
+        setError("Invalid partner link.");
         setLoading(false);
         return;
       }
-
-      const storedId = localStorage.getItem(STORAGE_PREFIX + projectToken);
-
-      if (!storedId) {
-        setError("No active partner organisation found. Please start again.");
-        setLoading(false);
-        return;
-      }
-
-      setPartnerOrgId(storedId);
 
       const { data, error } = await supabase
         .from("project_partner_orgs")
         .select(
           `
+          id,
           country_code,
           organisation_name,
           address_line1,
@@ -77,7 +72,7 @@ export default function PartnerOrganisationPage() {
           address_region
         `
         )
-        .eq("id", storedId)
+        .eq("resume_token", partnerResumeToken)
         .single();
 
       if (error || !data) {
@@ -87,25 +82,23 @@ export default function PartnerOrganisationPage() {
         return;
       }
 
+      setPartnerOrg(data);
       setCountryCode(data.country_code);
-      setOrganisationName(data.organisation_name || "");
-      setAddressLine1(data.address_line1 || "");
-      setAddressLine2(data.address_line2 || "");
-      setPostalCode(data.address_postal_code || "");
-      setCity(data.address_city || "");
-      setRegion(data.address_region || "");
+      setOrganisationName(data.organisation_name ?? "");
+      setAddressLine1(data.address_line1 ?? "");
+      setAddressLine2(data.address_line2 ?? "");
+      setPostalCode(data.address_postal_code ?? "");
+      setCity(data.address_city ?? "");
+      setRegion(data.address_region ?? "");
 
       setLoading(false);
     }
 
     load();
-  }, [projectToken]);
+  }, [partnerResumeToken]);
 
-  /* --------------------------------------------------
-     Save & continue
-  -------------------------------------------------- */
   async function handleContinue() {
-    if (!partnerOrgId) return;
+    if (!partnerOrg || !partnerResumeToken) return;
 
     setError(null);
 
@@ -130,7 +123,7 @@ export default function PartnerOrganisationPage() {
         address_city: city.trim(),
         address_region: region.trim() || null,
       })
-      .eq("id", partnerOrgId);
+      .eq("id", partnerOrg.id);
 
     setSaving(false);
 
@@ -140,12 +133,9 @@ export default function PartnerOrganisationPage() {
       return;
     }
 
-    navigate(`/p/${projectToken}/contact`);
+    navigate(`/partner/${partnerResumeToken}/contact`);
   }
 
-  /* --------------------------------------------------
-     Render
-  -------------------------------------------------- */
   if (loading) {
     return (
       <Box
@@ -167,7 +157,7 @@ export default function PartnerOrganisationPage() {
         <Stack gap="xl">
           <Stack gap={4}>
             <Text size="sm" c="dimmed">
-              Step 2 of 7
+              Organisation Setup · Step 2 of 3
             </Text>
             <Title order={2}>Partner organisation</Title>
             <Text size="sm" c="dimmed">

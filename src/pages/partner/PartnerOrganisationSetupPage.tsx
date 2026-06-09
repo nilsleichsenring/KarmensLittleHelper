@@ -1,3 +1,5 @@
+// src/pages/partner/PartnerOrganisationSetupPage.tsx
+
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -5,27 +7,37 @@ import {
   Box,
   Button,
   Container,
+  Group,
   Loader,
   Select,
   Stack,
   Text,
   TextInput,
   Title,
-  Group,
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
 import { countryCodeToName } from "../../lib/flags";
 
-/** Flag image helper (FILES ARE UPPERCASE: /flags/DE.svg) */
 function flagUrl(code: string | null) {
   if (!code) return undefined;
   return `/flags/${code.toUpperCase()}.svg`;
 }
 
-export default function PartnerSetupPage() {
-  const { projectToken } = useParams<{ projectToken: string }>();
+type PartnerOrg = {
+  id: string;
+  project_id: string;
+  country_code: string | null;
+  organisation_name: string | null;
+};
+
+export default function PartnerOrganisationSetupPage() {
+  const { partnerResumeToken } = useParams<{
+    partnerResumeToken: string;
+  }>();
+
   const navigate = useNavigate();
 
+  const [partnerOrg, setPartnerOrg] = useState<PartnerOrg | null>(null);
   const [countryOptions, setCountryOptions] = useState<
     { value: string; label: string }[]
   >([]);
@@ -37,40 +49,39 @@ export default function PartnerSetupPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* --------------------------------------------------
-     Load project + allowed countries
-     (submission already exists at this point)
-  -------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      if (!projectToken) {
-        setError("Invalid project link.");
+      if (!partnerResumeToken) {
+        setError("Invalid partner link.");
         setLoading(false);
         return;
       }
 
-      // Load project (invite link uses project.id)
-      const { data: project, error: pErr } = await supabase
-        .from("projects")
-        .select("id")
-        .eq("id", projectToken)
+      const { data: org, error: orgError } = await supabase
+        .from("project_partner_orgs")
+        .select("id, project_id, country_code, organisation_name")
+        .eq("resume_token", partnerResumeToken)
         .single();
 
-      if (pErr || !project) {
-        setError("Invalid or expired project link.");
+      if (orgError || !org) {
+        console.error(orgError);
+        setError("Partner organisation not found.");
         setLoading(false);
         return;
       }
 
-      // Load allowed countries
-      const { data: countries, error: cErr } = await supabase
+      setPartnerOrg(org);
+      setCountry(org.country_code);
+      setOrganisationName(org.organisation_name ?? "");
+
+      const { data: countries, error: countriesError } = await supabase
         .from("project_countries")
         .select("country_code")
-        .eq("project_id", project.id)
+        .eq("project_id", org.project_id)
         .order("country_code");
 
-      if (cErr) {
-        console.error(cErr);
+      if (countriesError) {
+        console.error(countriesError);
         setError("Could not load project countries.");
         setLoading(false);
         return;
@@ -87,13 +98,10 @@ export default function PartnerSetupPage() {
     }
 
     load();
-  }, [projectToken]);
+  }, [partnerResumeToken]);
 
-  /* --------------------------------------------------
-     Step 1 – Update partner organisation
-  -------------------------------------------------- */
   async function handleContinue() {
-    if (!projectToken) return;
+    if (!partnerOrg || !partnerResumeToken) return;
 
     setError(null);
 
@@ -107,13 +115,6 @@ export default function PartnerSetupPage() {
       return;
     }
 
-    const partnerOrgId = localStorage.getItem(`partner_org_${projectToken}`);
-
-    if (!partnerOrgId) {
-      setError("Partner organisation not found. Please restart the process.");
-      return;
-    }
-
     setSaving(true);
 
     const { error } = await supabase
@@ -122,7 +123,7 @@ export default function PartnerSetupPage() {
         country_code: country,
         organisation_name: organisationName.trim(),
       })
-      .eq("id", partnerOrgId);
+      .eq("id", partnerOrg.id);
 
     setSaving(false);
 
@@ -132,12 +133,9 @@ export default function PartnerSetupPage() {
       return;
     }
 
-    navigate(`/p/${projectToken}/organisation`);
+    navigate(`/partner/${partnerResumeToken}/organisation`);
   }
 
-  /* --------------------------------------------------
-     Render
-  -------------------------------------------------- */
   if (loading) {
     return (
       <Box
@@ -159,11 +157,12 @@ export default function PartnerSetupPage() {
         <Stack gap="xl">
           <Stack gap={4}>
             <Text size="sm" c="dimmed">
-              Step 1 of 7
+              Organisation Setup · Step 1 of 3
             </Text>
             <Title order={2}>Partner organisation setup</Title>
             <Text size="sm" c="dimmed">
-              Please select country and enter the full legal name of your organisation.
+              Please select the country and enter the full legal name of your
+              organisation.
             </Text>
           </Stack>
 
@@ -188,7 +187,8 @@ export default function PartnerSetupPage() {
                     flexShrink: 0,
                   }}
                   onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                    (e.currentTarget as HTMLImageElement).style.display =
+                      "none";
                   }}
                 />
                 <Text>{option.label}</Text>

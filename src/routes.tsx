@@ -22,6 +22,11 @@ import PartnerParticipantsPage from "./pages/partner/PartnerParticipantsPage";
 import PartnerTicketsPage from "./pages/partner/PartnerTicketsPage";
 import PartnerSubmitPage from "./pages/partner/PartnerSubmitPage";
 import PartnerDonePage from "./pages/partner/PartnerDonePage";
+import PartnerDashboardPage from "./pages/partner/PartnerDashboardPage";
+import PartnerOrganisationSetupPage from "./pages/partner/PartnerOrganisationSetupPage";
+import PartnerOrganisationDetailsPage from "./pages/partner/PartnerOrganisationDetailsPage";
+import PartnerOrganisationContactPage from "./pages/partner/PartnerOrganisationContactPage";
+import PartnerOrganisationDetailsViewPage from "./pages/partner/PartnerOrganisationDetailsViewPage";
 
 /* Participant pages */
 import ParticipantOnboardingPage from "./pages/participant/ParticipantOnboardingPage";
@@ -43,6 +48,34 @@ export function AppRoutes() {
           element={<AdminProjectCountriesPage />}
         />
       </Route>
+
+      {/* Partner Dashboard 2.0 */}
+      <Route
+        path="/partner/:partnerResumeToken"
+        element={<PartnerDashboardPage />}
+      />
+
+      <Route
+        path="/partner/:partnerResumeToken/setup"
+        element={<PartnerOrganisationSetupPage />}
+      />
+
+      <Route
+        path="/partner/:partnerResumeToken/organisation"
+        element={<PartnerOrganisationDetailsPage />}
+      />
+
+      <Route
+        path="/partner/:partnerResumeToken/contact"
+        element={<PartnerOrganisationContactPage />}
+      />
+
+      <Route
+        path="/partner/:partnerResumeToken/organisation-details"
+        element={<PartnerOrganisationDetailsViewPage />}
+      />
+
+      {/* Partner – Einstieg */}
 
       {/* Partner – Einstieg */}
       <Route path="/p/:projectToken" element={<PartnerOnboardingPage />} />

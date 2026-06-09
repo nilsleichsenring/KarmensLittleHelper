@@ -1,3 +1,5 @@
+// src/pages/partner/components/PartnerResumeHeader.tsx
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -14,12 +16,12 @@ import { HelpTooltip } from "../../../components/HelpTooltip";
 
 type Props = {
   projectToken: string;
-  submissionId: string;
+  partnerOrgId: string;
 };
 
 export default function PartnerResumeHeader({
   projectToken,
-  submissionId,
+  partnerOrgId,
 }: Props) {
   const [resumeToken, setResumeToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,15 +37,15 @@ export default function PartnerResumeHeader({
     let alive = true;
 
     async function loadResumeToken() {
-      if (!submissionId) return;
+      if (!partnerOrgId) return;
 
       setLoading(true);
       setError(null);
 
       const { data, error } = await supabase
-        .from("project_partner_submissions")
+        .from("project_partner_orgs")
         .select("resume_token")
-        .eq("id", submissionId)
+        .eq("id", partnerOrgId)
         .single();
 
       if (!alive) return;
@@ -64,7 +66,7 @@ export default function PartnerResumeHeader({
     return () => {
       alive = false;
     };
-  }, [submissionId]);
+  }, [partnerOrgId]);
 
   async function handleCopy() {
     if (!resumeLink) return;
@@ -103,19 +105,13 @@ export default function PartnerResumeHeader({
             Resume link not available yet.
           </Text>
         ) : (
-      <Group gap="xs">
-        <Button
-          variant="light"
-          onClick={handleCopy}
-          size="sm"
-        >
-          {copyOk ? "Copied!" : "Copy resume link"}
-        </Button>
+          <Group gap="xs">
+            <Button variant="light" onClick={handleCopy} size="sm">
+              {copyOk ? "Copied!" : "Copy resume link"}
+            </Button>
 
-        <HelpTooltip
-          label="Use this link to continue your submission later or on another device."
-        />
-      </Group>
+            <HelpTooltip label="Use this link to continue your organisation setup later or on another device." />
+          </Group>
         )}
       </Group>
 

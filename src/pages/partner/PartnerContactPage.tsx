@@ -1,3 +1,5 @@
+// src/pages/partner/PartnerContactPage.tsx
+
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -13,13 +15,13 @@ import {
 } from "@mantine/core";
 import { supabase } from "../../lib/supabaseClient";
 
-const STORAGE_PREFIX = "partner_submission_";
+const STORAGE_PREFIX = "partner_org_";
 
 export default function PartnerContactPage() {
   const { projectToken } = useParams<{ projectToken: string }>();
   const navigate = useNavigate();
 
-  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [partnerOrgId, setPartnerOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [contactName, setContactName] = useState("");
@@ -29,7 +31,7 @@ export default function PartnerContactPage() {
   const [error, setError] = useState<string | null>(null);
 
   /* --------------------------------------------------
-     Load submissionId from localStorage
+     Load partnerOrgId from localStorage
   -------------------------------------------------- */
   useEffect(() => {
     if (!projectToken) {
@@ -41,12 +43,12 @@ export default function PartnerContactPage() {
     const stored = localStorage.getItem(STORAGE_PREFIX + projectToken);
 
     if (!stored) {
-      setError("No active submission found. Please start again.");
+      setError("No active partner organisation found. Please start again.");
       setLoading(false);
       return;
     }
 
-    setSubmissionId(stored);
+    setPartnerOrgId(stored);
   }, [projectToken]);
 
   /* --------------------------------------------------
@@ -54,12 +56,12 @@ export default function PartnerContactPage() {
   -------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      if (!submissionId) return;
+      if (!partnerOrgId) return;
 
       const { data, error } = await supabase
-        .from("project_partner_submissions")
+        .from("project_partner_orgs")
         .select("contact_name, contact_email")
-        .eq("id", submissionId)
+        .eq("id", partnerOrgId)
         .single();
 
       if (error) {
@@ -76,13 +78,13 @@ export default function PartnerContactPage() {
     }
 
     load();
-  }, [submissionId]);
+  }, [partnerOrgId]);
 
   /* --------------------------------------------------
      Save & continue
   -------------------------------------------------- */
   async function handleContinue() {
-    if (!submissionId) return;
+    if (!partnerOrgId) return;
 
     setError(null);
 
@@ -104,12 +106,13 @@ export default function PartnerContactPage() {
     setSaving(true);
 
     const { error } = await supabase
-      .from("project_partner_submissions")
+      .from("project_partner_orgs")
       .update({
         contact_name: contactName.trim(),
         contact_email: contactEmail.trim(),
+        organisation_setup_completed_at: new Date().toISOString(),
       })
-      .eq("id", submissionId);
+      .eq("id", partnerOrgId);
 
     setSaving(false);
 
@@ -140,7 +143,7 @@ export default function PartnerContactPage() {
     );
   }
 
-  if (error && !submissionId) {
+  if (error && !partnerOrgId) {
     return (
       <Container size="sm" py="xl">
         <Stack>
@@ -161,8 +164,8 @@ export default function PartnerContactPage() {
             </Text>
             <Title order={2}>Contact person</Title>
             <Text size="sm" c="dimmed">
-              Please provide the main contact person for this reimbursement
-              claim.
+              Please provide the main contact person for this partner
+              organisation.
             </Text>
           </Stack>
 

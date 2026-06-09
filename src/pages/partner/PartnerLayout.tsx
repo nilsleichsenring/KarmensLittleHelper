@@ -10,9 +10,8 @@ import StepNavigation, {
 } from "../../components/StepNavigation";
 import PartnerResumeHeader from "./components/PartnerResumeHeader";
 
-const STORAGE_PREFIX = "partner_submission_";
+const STORAGE_PREFIX = "partner_org_";
 
-// STEP MASTER DEFINITION
 const STEPS = [
   { label: "Setup", path: "setup" },
   { label: "Organisation", path: "organisation" },
@@ -30,22 +29,16 @@ export default function PartnerLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [partnerOrgId, setPartnerOrgId] = useState<string | null>(null);
   const [maxReachedStepIndex, setMaxReachedStepIndex] = useState(0);
 
-  // --------------------------------------------------
-  // Load submissionId
-  // --------------------------------------------------
   useEffect(() => {
     if (!projectToken) return;
 
     const stored = localStorage.getItem(STORAGE_PREFIX + projectToken);
-    setSubmissionId(stored);
+    setPartnerOrgId(stored);
   }, [projectToken]);
 
-  // --------------------------------------------------
-  // Current Step Detection
-  // --------------------------------------------------
   const currentStepIndex = useMemo(() => {
     if (!projectToken) return 0;
 
@@ -58,9 +51,6 @@ export default function PartnerLayout() {
 
   const safeStepIndex = Math.max(0, currentStepIndex);
 
-  // --------------------------------------------------
-  // Load max reached step (initial)
-  // --------------------------------------------------
   useEffect(() => {
     if (!projectToken) return;
 
@@ -71,9 +61,6 @@ export default function PartnerLayout() {
     setMaxReachedStepIndex(storedMax);
   }, [projectToken]);
 
-  // --------------------------------------------------
-  // Max step memory
-  // --------------------------------------------------
   useEffect(() => {
     if (!projectToken) return;
 
@@ -91,16 +78,9 @@ export default function PartnerLayout() {
     }
   }, [safeStepIndex, projectToken, maxReachedStepIndex]);
 
-  // --------------------------------------------------
-  // Header visibility
-  // --------------------------------------------------
   const isOnboarding = location.pathname === `/p/${projectToken}`;
+  const showHeader = !isOnboarding && !!partnerOrgId && !!projectToken;
 
-  const showHeader = !isOnboarding && !!submissionId && !!projectToken;
-
-  // --------------------------------------------------
-  // Navigation
-  // --------------------------------------------------
   function handleStepClick(stepPath: PartnerStepPath) {
     if (!projectToken) return;
 
@@ -136,9 +116,6 @@ export default function PartnerLayout() {
     }
   );
 
-  // --------------------------------------------------
-  // Render
-  // --------------------------------------------------
   return (
     <>
       {showHeader && (
@@ -147,7 +124,7 @@ export default function PartnerLayout() {
           right={
             <PartnerResumeHeader
               projectToken={projectToken}
-              submissionId={submissionId}
+              partnerOrgId={partnerOrgId}
             />
           }
         />
